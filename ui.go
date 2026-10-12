@@ -21,6 +21,7 @@ var (
 	text     = lipgloss.Color("#cdd6f4")
 	overlay0 = lipgloss.Color("#6c7086")
 	surface0 = lipgloss.Color("#313244")
+	surface2 = lipgloss.Color("#585b70")
 	blue     = lipgloss.Color("#89b4fa")
 	flamingo = lipgloss.Color("#f2cdcd")
 	green    = lipgloss.Color("#a6e3a1")
@@ -313,9 +314,31 @@ func (m model) View() string {
 	if m.width >= 60 {
 		leftWidth = m.width / 2
 	}
-	left := []string{" " + m.promptLine(leftWidth-2), dimStyle.Render(strings.Repeat("─", leftWidth))}
-	for _, l := range m.resultLines(leftWidth-1, m.height-2) {
-		left = append(left, " "+l)
+	// 横線の行は、縦の区切り線と ┤ でつなげる
+	var left []string
+	rules := map[int]bool{}
+	addRule := func() {
+		rules[len(left)] = true
+		left = append(left, dimStyle.Render(strings.Repeat("─", leftWidth)))
+	}
+	// 位置がずれないよう、入力欄は goto でも常に出す。goto の操作の説明と件数は下に控えめに出す
+	left = append(left, " "+m.promptLine(leftWidth-2))
+	addRule()
+	footerHeight := 0
+	if m.gotoMode {
+		footerHeight = 1
+	}
+	resultsHeight := max(m.height-len(left)-footerHeight, 0)
+	results := m.resultLines(leftWidth-1, resultsHeight)
+	for i := range resultsHeight {
+		line := ""
+		if i < len(results) {
+			line = " " + results[i]
+		}
+		left = append(left, line)
+	}
+	if m.gotoMode {
+		left = append(left, " "+m.footerLine(leftWidth-2))
 	}
 	if leftWidth == m.width {
 		return strings.Join(fitLines(left, leftWidth, m.height), "\n")
@@ -336,8 +359,8 @@ func (m model) View() string {
 	lines := make([]string, m.height)
 	for i := range lines {
 		divider := "│"
-		if i == 1 {
-			divider = "┤" // 入力欄の下の横線とつなげる
+		if rules[i] {
+			divider = "┤"
 		}
 		lines[i] = left[i] + dimStyle.Render(divider) + right[i]
 	}
@@ -359,24 +382,49 @@ func fitLines(lines []string, width, height int) []string {
 }
 
 func (m model) promptLine(width int) string {
-	prompt := lipgloss.NewStyle().Foreground(flamingo).Render("> ")
-	switch {
-	case m.searching:
+	// goto で / を押す前は入力できないので、> を暗くする
+	prefix := lipgloss.NewStyle().Foreground(flamingo)
+	if !m.searching {
+		prefix = prefix.Foreground(surface2)
+	}
+	prompt := prefix.Render("> ")
+	if m.searching {
 		prompt += m.queryWithCursor()
-	case len(m.query) > 0:
+	} else {
 		prompt += titleStyle.Render(string(m.query))
-	default:
-		prompt += dimStyle.Render("/ search  b/w/i/d filter  a all")
 	}
-	if m.status != "" {
-		prompt += " " + lipgloss.NewStyle().Foreground(statusColor(m.status)).Render("● "+m.status)
-	}
-	count := dimStyle.Render(fmt.Sprintf("%d / %d ", len(m.matches), len(m.items)))
-	gap := width - lipgloss.Width(prompt) - lipgloss.Width(count)
-	if gap < 1 {
+	// goto の件数は footerLine で右端に出す
+	if m.gotoMode {
 		return prompt
 	}
-	return prompt + strings.Repeat(" ", gap) + count
+	return spread(prompt, m.count(), width)
+}
+
+func (m model) count() string {
+	return dimStyle.Render(fmt.Sprintf("%d / %d", len(m.matches), len(m.items)))
+}
+
+// goto の一番下の行。操作の説明を出し、右端に絞り込み中の状態と件数を出す
+func (m model) footerLine(width int) string {
+	help := "/ search  b/w/i/d filter  a all  ←/→ workspace  enter jump"
+	if m.searching {
+		help = "esc done  ctrl-n/p move  enter jump"
+	}
+	faint := lipgloss.NewStyle().Foreground(surface2)
+	right := faint.Render(fmt.Sprintf("%d / %d", len(m.matches), len(m.items)))
+	if m.status != "" {
+		right = lipgloss.NewStyle().Foreground(statusColor(m.status)).Render("● "+m.status) + "  " + right
+	}
+	return spread(faint.Render(help), right, width)
+}
+
+// left を左端、right を右端に置く。入りきらなければ right を省く
+func spread(left, right string, width int) string {
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 // カーソル位置の文字を反転させて描画する
