@@ -54,26 +54,33 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", max(width-ansi.StringWidth(s), 0))
 }
 
-func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ", kindColor(kind)} }
-
-func newCommand(title, desc, command string, run func() error) item {
-	return item{
-		id:      "command:" + title,
-		kind:    "command",
-		title:   title,
-		columns: []column{kindColumn("command"), {title, text}},
-		desc:    desc,
-		command: command,
-		run:     run,
+// コマンドの説明とペイン名のように、最後の列の開始位置を全候補で揃える。
+// 最後の列の 1 つ前の列を空白で伸ばす
+func alignLastColumn(items []item) []item {
+	prefixWidth := func(it item) int {
+		w := 0
+		for _, c := range it.columns[:len(it.columns)-1] {
+			w += ansi.StringWidth(c.text)
+		}
+		return w
 	}
+	target := 0
+	for _, it := range items {
+		target = max(target, prefixWidth(it))
+	}
+	for i, it := range items {
+		if len(it.columns) < 2 {
+			continue
+		}
+		cols := append([]column(nil), it.columns...)
+		before := &cols[len(cols)-2]
+		before.text += strings.Repeat(" ", target-prefixWidth(it))
+		items[i].columns = cols
+	}
+	return items
 }
 
-var commands = []item{
-	newCommand("lazygit", "Open lazygit in a popup.", "lazygit", func() error { return openPane("lazygit") }),
-	newCommand("neovim", "Open nvim in a popup.", "nvim", func() error { return openPane("nvim") }),
-	newCommand("gh browse", "Open the repository in the browser.", "gh browse", func() error { return runCommand("gh", "browse") }),
-	newCommand("gh pr view --web", "Open the pull request for the current branch in the browser.", "gh pr view --web", func() error { return runCommand("gh", "pr", "view", "--web") }),
-}
+func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ", kindColor(kind)} }
 
 func main() {
 	// ランチャーが閉じた後に afterClose から起動される
@@ -98,7 +105,10 @@ func main() {
 	if gotoMode {
 		chosen, err = pick(paneItems(), true)
 	} else {
-		chosen, err = pick(append(commands, paneItems()...), false)
+		var commands []item
+		if commands, err = loadCommands(commandsPath()); err == nil {
+			chosen, err = pick(alignLastColumn(append(commands, paneItems()...)), false)
+		}
 	}
 	if err == nil && chosen == nil {
 		return

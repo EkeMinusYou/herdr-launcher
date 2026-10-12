@@ -1,11 +1,44 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
+
+func testCommands(t *testing.T) []item {
+	t.Helper()
+	items, err := loadCommands("commands.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+func TestLoadCommands(t *testing.T) {
+	items := testCommands(t)
+	if len(items) == 0 {
+		t.Fatal("no commands")
+	}
+	// 名前の列幅が揃っている
+	w := ansi.StringWidth(items[0].columns[1].text)
+	for _, it := range items {
+		if got := ansi.StringWidth(it.columns[1].text); got != w {
+			t.Errorf("%s: name column width %d, want %d", it.title, got, w)
+		}
+	}
+}
+
+func TestLoadCommandsInvalid(t *testing.T) {
+	path := t.TempDir() + "/commands.toml"
+	os.WriteFile(path, []byte("[[commands]]\nname = \"both\"\ncommand = \"ls\"\npane = \"nvim\"\n"), 0o644)
+	if _, err := loadCommands(path); err == nil {
+		t.Error("want error when both command and pane are set")
+	}
+}
 
 func runes(s string) tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 func key(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
@@ -35,7 +68,7 @@ func TestEditQuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var m tea.Model = model{items: commands, searching: true}
+			var m tea.Model = model{items: testCommands(t), searching: true}
 			for _, k := range tt.keys {
 				m, _ = m.Update(k)
 			}
@@ -61,7 +94,7 @@ func TestMoveSelection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mm := model{items: commands, searching: true}
+			mm := model{items: testCommands(t), searching: true}
 			mm.filter()
 			var m tea.Model = mm
 			quit := false
@@ -168,5 +201,23 @@ func TestGoto(t *testing.T) {
 					string(got.query), strings.Join(ids, " "), at, quit, tt.query, tt.ids, tt.at, tt.quit)
 			}
 		})
+	}
+}
+
+func TestAlignLastColumn(t *testing.T) {
+	items := alignLastColumn([]item{
+		{columns: []column{{"command  ", text}, {"gh browse  ", text}, {"説明", text}}},
+		{columns: []column{{"claude   ", text}, {"dotfiles  ", text}, {"1  ", text}, {"ペイン", text}}},
+	})
+	var starts []int
+	for _, it := range items {
+		w := 0
+		for _, c := range it.columns[:len(it.columns)-1] {
+			w += ansi.StringWidth(c.text)
+		}
+		starts = append(starts, w)
+	}
+	if starts[0] != starts[1] {
+		t.Errorf("last column starts at %v, want equal", starts)
 	}
 }
