@@ -11,8 +11,8 @@ platforms = ["macos", "linux"]
 id = "launcher"
 title = "launcher"
 placement = "popup"
-width = "80%"
-height = "90%"
+width = "70%"
+height = "70%"
 # --cwd を渡すと作業ディレクトリがプラグインのディレクトリでなくなるため、絶対パスで実行する
 command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/run.sh\""]
 
@@ -21,8 +21,8 @@ command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/run.sh\""]
 id = "goto"
 title = "goto"
 placement = "popup"
-width = "80%"
-height = "90%"
+width = "70%"
+height = "70%"
 command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/run.sh\" --goto"]
 
 [[panes]]
