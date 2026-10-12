@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -11,7 +12,11 @@ import (
 
 func testCommands(t *testing.T) []item {
 	t.Helper()
-	items, err := loadCommands("commands.toml")
+	cfg, err := loadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := commandItems(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +28,7 @@ func TestLoadCommands(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatal("no commands")
 	}
-	// 名前の列幅が揃っている
+	// name columns have the same width
 	w := ansi.StringWidth(items[0].columns[1].text)
 	for _, it := range items {
 		if got := ansi.StringWidth(it.columns[1].text); got != w {
@@ -35,7 +40,11 @@ func TestLoadCommands(t *testing.T) {
 func TestLoadCommandsInvalid(t *testing.T) {
 	path := t.TempDir() + "/commands.toml"
 	os.WriteFile(path, []byte("[[commands]]\nname = \"both\"\ncommand = \"ls\"\npane = \"nvim\"\n"), 0o644)
-	if _, err := loadCommands(path); err == nil {
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commandItems(cfg); err == nil {
 		t.Error("want error when both command and pane are set")
 	}
 }
@@ -113,24 +122,6 @@ func TestMoveSelection(t *testing.T) {
 	}
 }
 
-func TestDirection(t *testing.T) {
-	from := rect{X: 10, Y: 10, Width: 10, Height: 10}
-	tests := []struct {
-		to   rect
-		want string
-	}{
-		{rect{X: 0, Y: 10, Width: 10, Height: 10}, "left"},
-		{rect{X: 20, Y: 0, Width: 10, Height: 30}, "right"},
-		{rect{X: 0, Y: 0, Width: 30, Height: 10}, "up"},
-		{rect{X: 10, Y: 20, Width: 10, Height: 10}, "down"},
-	}
-	for _, tt := range tests {
-		if got := direction(from, tt.to); got != tt.want {
-			t.Errorf("direction(%v) = %s, want %s", tt.to, got, tt.want)
-		}
-	}
-}
-
 func TestScreenLines(t *testing.T) {
 	got := screenLines("a\nb\nc\n\x1b[0m  \n\n", 2)
 	if len(got) != 2 || got[0] != " b" || got[1] != " c" {
@@ -140,7 +131,7 @@ func TestScreenLines(t *testing.T) {
 
 func gotoItems() []item {
 	mk := func(id, group, status string) item {
-		return item{id: id, group: group, status: status, columns: []column{{id, text}}}
+		return item{id: id, group: group, status: status, columns: []column{{id, fg}}}
 	}
 	return []item{
 		mk("a1", "a", "working"),
@@ -156,8 +147,8 @@ func TestGoto(t *testing.T) {
 		name  string
 		keys  []tea.KeyMsg
 		query string
-		ids   string // 絞り込み後の候補
-		at    string // 選択中の候補
+		ids   string // items left after filtering
+		at    string // selected item
 		quit  bool
 	}{
 		{"j k", []tea.KeyMsg{runes("j"), runes("j"), runes("k")}, "", "a1 a2 b1 b2 c1", "a2", false},
@@ -167,7 +158,7 @@ func TestGoto(t *testing.T) {
 		{"left at first", []tea.KeyMsg{runes("j"), key(tea.KeyLeft)}, "", "a1 a2 b1 b2 c1", "a2", false},
 		{"filter working", []tea.KeyMsg{runes("w")}, "", "a1 c1", "a1", false},
 		{"filter blocked then all", []tea.KeyMsg{runes("b"), runes("a")}, "", "a1 a2 b1 b2 c1", "a1", false},
-		// / の後は j や w も検索文字になる
+		// after /, j and w are typed into the search
 		{"search", []tea.KeyMsg{runes("/"), runes("b")}, "b", "b1 b2", "b1", false},
 		{"search then esc then j", []tea.KeyMsg{runes("/"), runes("b"), key(tea.KeyEsc), runes("j")}, "b", "b1 b2", "b2", false},
 		{"esc", []tea.KeyMsg{key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
@@ -175,7 +166,7 @@ func TestGoto(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mm := model{items: gotoItems(), gotoMode: true}
+			mm := model{items: gotoItems(), selectFirst: true, hasPanes: true}
 			mm.filter()
 			var m tea.Model = mm
 			quit := false
@@ -206,8 +197,8 @@ func TestGoto(t *testing.T) {
 
 func TestAlignLastColumn(t *testing.T) {
 	items := alignLastColumn([]item{
-		{columns: []column{{"command  ", text}, {"gh browse  ", text}, {"説明", text}}},
-		{columns: []column{{"claude   ", text}, {"dotfiles  ", text}, {"1  ", text}, {"ペイン", text}}},
+		{columns: []column{{"command  ", fg}, {"gh browse  ", fg}, {"説明", fg}}},
+		{columns: []column{{"claude   ", fg}, {"dotfiles  ", fg}, {"1  ", fg}, {"ペイン", fg}}},
 	})
 	var starts []int
 	for _, it := range items {
@@ -219,5 +210,105 @@ func TestAlignLastColumn(t *testing.T) {
 	}
 	if starts[0] != starts[1] {
 		t.Errorf("last column starts at %v, want equal", starts)
+	}
+}
+
+func TestParseOptions(t *testing.T) {
+	opts, err := parseOptions([]string{"--start", "select", "--sources", "panes", "--cursor", "current"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.start != "select" || strings.Join(opts.sources, ",") != "panes" || opts.cursor != "current" || opts.sort != "herdr" {
+		t.Errorf("got %+v", opts)
+	}
+	for _, args := range [][]string{{"--start", "x"}, {"--sources", "commands,x"}, {"--cursor", "x"}, {"--sort", "x"}} {
+		if _, err := parseOptions(args); err == nil {
+			t.Errorf("%v: want error", args)
+		}
+	}
+}
+
+func TestHistory(t *testing.T) {
+	path := t.TempDir() + "/history.json"
+	now := time.Now()
+	h := loadHistory(path)
+	h.record(path, "old", now.Add(-100*24*time.Hour))
+	h.record(path, "a", now)
+	h.record(path, "b", now)
+	h.record(path, "b", now)
+	h = loadHistory(path)
+	if _, ok := h["old"]; ok {
+		t.Error("entries older than retention should be dropped")
+	}
+	if !(h.score("b", now) > h.score("a", now) && h.score("a", now) > h.score("none", now)) {
+		t.Errorf("scores b=%v a=%v none=%v", h.score("b", now), h.score("a", now), h.score("none", now))
+	}
+	// with equal counts, the more recent visit ranks higher
+	h2 := history{"recent": {1, now.Unix()}, "week": {1, now.Add(-3 * 24 * time.Hour).Unix()}}
+	if h2.score("recent", now) <= h2.score("week", now) {
+		t.Error("recent visit should score higher")
+	}
+}
+
+func TestFilterCommands(t *testing.T) {
+	items := append(gotoItems(), item{id: "cmd", kind: "command", columns: []column{{"cmd", fg}}})
+	mm := model{items: items, selectFirst: true, hasPanes: true, hasCommands: true}
+	mm.filter()
+	var m tea.Model = mm
+	m, _ = m.Update(runes("c"))
+	got := m.(model)
+	if len(got.matches) != 1 || got.matches[0].item.id != "cmd" {
+		t.Errorf("c should keep only commands, got %d matches", len(got.matches))
+	}
+	m, _ = m.Update(runes("a"))
+	if got := m.(model); len(got.matches) != len(items) {
+		t.Errorf("a should show all, got %d", len(got.matches))
+	}
+}
+
+func TestHelp(t *testing.T) {
+	tests := []struct {
+		name string
+		m    model
+		want string
+	}{
+		{"panes", model{hasPanes: true}, "/ search  b/w/i/d filter  a all  ←/→ workspace  enter select"},
+		{"commands", model{hasCommands: true}, "/ search  enter select"},
+		{"both", model{hasPanes: true, hasCommands: true}, "/ search  b/w/i/d/c filter  a all  ←/→ workspace  enter select"},
+		{"searching from select", model{hasPanes: true, selectFirst: true, searching: true}, "esc done  ctrl-n/p move  enter select"},
+		{"searching from search", model{hasPanes: true, searching: true}, "esc close  ctrl-n/p move  enter select"},
+	}
+	for _, tt := range tests {
+		if got := strings.Join(tt.m.help(), "  "); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	// c is not in the hints, so it does nothing
+	mm := model{items: gotoItems(), selectFirst: true, hasPanes: true}
+	mm.filter()
+	var m tea.Model = mm
+	m, _ = m.Update(runes("c"))
+	if got := m.(model); got.narrow != "" {
+		t.Errorf("c should be ignored without commands, narrow = %q", got.narrow)
+	}
+}
+
+func TestLoadConfigFallback(t *testing.T) {
+	cfg, err := loadConfig(t.TempDir() + "/missing.toml")
+	if err != nil || len(cfg.Commands) == 0 || cfg.Theme != "catppuccin" {
+		t.Errorf("missing file should fall back to the default config, got %+v, %v", cfg, err)
+	}
+}
+
+func TestApplyTheme(t *testing.T) {
+	defer applyTheme("catppuccin", palette{})
+	if err := applyTheme("ansi", palette{Accent: "#123456"}); err != nil {
+		t.Fatal(err)
+	}
+	if accent != "#123456" || red != "1" {
+		t.Errorf("accent = %q, red = %q", accent, red)
+	}
+	if err := applyTheme("nope", palette{}); err == nil {
+		t.Error("want error for unknown theme")
 	}
 }

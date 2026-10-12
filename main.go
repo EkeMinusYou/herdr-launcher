@@ -1,12 +1,16 @@
-// launcher は herdr の popup でコマンドや移動先のペインを選び、開いたときの cwd (--cwd) で実行する。
-// --goto ではペインだけを herdr の goto と同じ操作で選ぶ
+// launcher picks a command or a pane to jump to in a herdr popup and runs it in the cwd of the pane it was opened from.
+// Command-line flags decide what is listed and how it is picked (options.go).
 package main
 
 import (
 	"bufio"
+	"cmp"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -16,21 +20,21 @@ import (
 )
 
 type item struct {
-	id      string // プレビューのキャッシュに使う
-	kind    string // command / terminal / claude などのエージェント名
-	status  string // herdr の agent_status。コマンドと terminal では空
-	title   string // プレビューの枠のタイトル
+	id      string // key for the preview cache
+	kind    string // command, terminal, or an agent name such as claude
+	status  string // herdr's agent_status; empty for commands and terminals
+	title   string // heading of the preview
 	columns []column
-	extra   string // 一覧には出さないが絞り込みの対象にする文字列 (ブランチやパス)
-	group   string // goto で前後のワークスペースへ移動するための単位
+	extra   string // searchable text that is not displayed (branch and path)
+	group   string // unit for jumping to the previous/next workspace
 	focused bool
 	desc    string
-	command string // プレビューに出す実行コマンド。移動先の候補では空
+	command string // command shown in the preview; empty for panes
 	run     func() error
-	preview func() (string, error) // プレビューに出すペインの画面。nil なら出さない
+	preview func() (string, error) // screen shown in the preview; nil shows none
 }
 
-// 一覧の 1 列。縦を揃えるため text は列幅まで空白で埋めておく
+// One column of a list row. text is padded to the column width so columns line up.
 type column struct {
 	text  string
 	color lipgloss.Color
@@ -44,18 +48,18 @@ func (it item) label() string {
 	return b.String()
 }
 
-// 一覧に出す文字列から始めるので、一致した位置をそのまま一覧の強調に使える
+// Starts with the displayed label, so match positions map directly onto the row for highlighting.
 func (it item) searchText() string { return it.label() + " " + it.extra }
 
 const kindWidth = 8
 
-// 表示幅 (全角は 2) で width まで空白を足す
+// Pads s with spaces to width, counting display width (wide characters count as 2).
 func pad(s string, width int) string {
 	return s + strings.Repeat(" ", max(width-ansi.StringWidth(s), 0))
 }
 
-// コマンドの説明とペイン名のように、最後の列の開始位置を全候補で揃える。
-// 最後の列の 1 つ前の列を空白で伸ばす
+// Aligns where the last column starts across all items, such as command descriptions and pane names,
+// by padding the column before it.
 func alignLastColumn(items []item) []item {
 	prefixWidth := func(it item) int {
 		w := 0
@@ -83,45 +87,134 @@ func alignLastColumn(items []item) []item {
 func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ", kindColor(kind)} }
 
 func main() {
-	// ランチャーが閉じた後に afterClose から起動される
+	// Started by afterClose once the launcher has closed.
 	if len(os.Args) == 4 && os.Args[1] == "open-pane" {
 		if err := openPaneAfterClose(os.Args[2], os.Args[3]); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) == 5 && os.Args[1] == "focus-pane" {
+	if len(os.Args) == 3 && os.Args[1] == "focus-pane" {
 		waitForClose()
-		if err := focusPane(pane{ID: os.Args[2], TabID: os.Args[3], Agent: os.Args[4]}); err != nil {
+		if err := focusPane(os.Args[2]); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
 
-	// --goto は herdr の goto (prefix+g) の代わりにペインだけを選ぶ
-	gotoMode := len(os.Args) == 2 && os.Args[1] == "--goto"
 	var chosen *item
-	var err error
-	if gotoMode {
-		chosen, err = pick(paneItems(), true)
-	} else {
-		var commands []item
-		if commands, err = loadCommands(commandsPath()); err == nil {
-			chosen, err = pick(alignLastColumn(append(commands, paneItems()...)), false)
+	opts, err := parseOptions(os.Args[1:])
+	if err == nil {
+		err = rebuildIfStale()
+	}
+	if err == nil {
+		chdirToFocusedPane()
+		var cfg config
+		if cfg, err = loadConfig(configPath()); err == nil {
+			err = applyTheme(cfg.Theme, cfg.Colors)
+		}
+		var items []item
+		if err == nil {
+			items, err = collect(opts, cfg)
+		}
+		if err == nil {
+			chosen, err = pick(items, opts)
 		}
 	}
 	if err == nil && chosen == nil {
 		return
 	}
 	if err == nil {
+		if path := historyPath(); path != "" {
+			loadHistory(path).record(path, chosen.id, time.Now())
+		}
 		err = chosen.run()
 	}
 	if err != nil {
-		// エラーを読めるようにしてから閉じる
+		// Keep the error readable before closing.
 		fmt.Fprintf(os.Stderr, "\n%v\npress enter to close", err)
 		bufio.NewReader(os.Stdin).ReadString('\n')
 		os.Exit(1)
 	}
+}
+
+// Collects items from opts.sources and orders them by opts.sort.
+func collect(opts options, cfg config) ([]item, error) {
+	var items []item
+	for _, source := range opts.sources {
+		switch source {
+		case "commands":
+			commands, err := commandItems(cfg)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, commands...)
+		case "panes":
+			items = append(items, paneItems()...)
+		}
+	}
+	switch opts.sort {
+	case "name":
+		slices.SortStableFunc(items, func(a, b item) int { return strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title)) })
+	case "frecency":
+		h, now := loadHistory(historyPath()), time.Now()
+		slices.SortStableFunc(items, func(a, b item) int { return cmp.Compare(h.score(b.id, now), h.score(a.id, now)) })
+	}
+	return alignLastColumn(items), nil
+}
+
+// plugin link does not build, so rebuild when a source file is newer than the binary and re-exec the new binary.
+// The very first binary still has to be built by hand with go build.
+func rebuildIfStale() error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return err
+	}
+	built, err := os.Stat(self)
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(filepath.Dir(self))
+	stale := false
+	for _, pattern := range []string{"*.go", "go.mod", "go.sum", "default_config.toml"} {
+		files, _ := filepath.Glob(filepath.Join(root, pattern))
+		for _, f := range files {
+			if info, err := os.Stat(f); err == nil && info.ModTime().After(built.ModTime()) {
+				stale = true
+			}
+		}
+	}
+	if !stale {
+		return nil
+	}
+	cmd := exec.Command("go", "build", "-o", self, ".")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("go build: %w\n%s", err, out)
+	}
+	return syscall.Exec(self, os.Args, os.Environ())
+}
+
+// Plugin panes start in the plugin directory; move to the cwd of the pane the launcher was opened from so commands run there.
+func chdirToFocusedPane() {
+	var ctx struct {
+		Cwd string `json:"focused_pane_cwd"`
+	}
+	json.Unmarshal([]byte(os.Getenv("HERDR_PLUGIN_CONTEXT_JSON")), &ctx)
+	if ctx.Cwd != "" {
+		os.Chdir(ctx.Cwd)
+	}
+}
+
+// The plugin id passed by herdr. The environment is inherited by processes started with afterClose.
+func pluginID() string {
+	if id := os.Getenv("HERDR_PLUGIN_ID"); id != "" {
+		return id
+	}
+	return "ekeminusyou.launcher"
 }
 
 func runCommand(name string, args ...string) error {
@@ -130,9 +223,9 @@ func runCommand(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// popup は同時に 1 つしか開けず、overlay で開いた場合は閉じるときに開く前のペインへフォーカスが戻される。
-// どちらでも効くよう、lazygit などを開いたりペインへ移動したりする処理はランチャーが閉じてから行う。
-// 閉じると同じセッションのプロセスは止められるので、自分自身を新しいセッションで起動して任せる
+// Only one popup can be open at a time, and an overlay restores the previous focus when it closes.
+// To work with both, opening lazygit or focusing a pane happens after the launcher has closed.
+// Closing stops processes in the same session, so hand the work to a copy of this binary in a new session.
 func afterClose(args ...string) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -151,7 +244,7 @@ func openPane(entrypoint string) error {
 	return afterClose("open-pane", entrypoint, cwd)
 }
 
-// overlay で開いた場合の HERDR_PANE_ID はランチャー自身のペイン。それが消えるまで待つ (popup では空)
+// As an overlay, HERDR_PANE_ID is the launcher's own pane; wait for it to go away (it is empty for popups).
 func waitForClose() {
 	self := os.Getenv("HERDR_PANE_ID")
 	if self == "" {
@@ -168,9 +261,9 @@ func waitForClose() {
 func openPaneAfterClose(entrypoint, cwd string) error {
 	waitForClose()
 	var err error
-	// popup は同時に 1 つしか開けないため、開けなければ少し待って再試行する
+	// Only one popup can be open at a time, so retry for a while if it cannot open yet.
 	for range 20 {
-		if err = herdr("plugin", "pane", "open", "--plugin", "launcher", "--entrypoint", entrypoint, "--cwd", cwd, "--focus"); err == nil {
+		if err = herdr("plugin", "pane", "open", "--plugin", pluginID(), "--entrypoint", entrypoint, "--cwd", cwd, "--focus"); err == nil {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)

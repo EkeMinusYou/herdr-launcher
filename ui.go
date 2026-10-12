@@ -1,11 +1,12 @@
 package main
 
-// nvim の telescope (horizontal, prompt_position = top, sorting_strategy = ascending) の配置と
-// catppuccin-mocha の配色に揃えたピッカー。外枠は herdr の popup の枠を使う
+// A picker laid out like nvim's telescope (horizontal, prompt_position = top, sorting_strategy = ascending).
+// Colors live in theme.go; the outer frame is the herdr popup's own border.
 
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,25 +14,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"github.com/sahilm/fuzzy"
-)
-
-// catppuccin-mocha
-var (
-	base     = lipgloss.Color("#1e1e2e")
-	text     = lipgloss.Color("#cdd6f4")
-	overlay0 = lipgloss.Color("#6c7086")
-	surface0 = lipgloss.Color("#313244")
-	surface2 = lipgloss.Color("#585b70")
-	blue     = lipgloss.Color("#89b4fa")
-	flamingo = lipgloss.Color("#f2cdcd")
-	green    = lipgloss.Color("#a6e3a1")
-	yellow   = lipgloss.Color("#f9e2af")
-	red      = lipgloss.Color("#f38ba8")
-	peach    = lipgloss.Color("#fab387")
-	subtext0 = lipgloss.Color("#a6adc8")
-
-	titleStyle = lipgloss.NewStyle().Foreground(text)
-	dimStyle   = lipgloss.NewStyle().Foreground(overlay0)
 )
 
 type match struct {
@@ -42,18 +24,22 @@ type match struct {
 type model struct {
 	items         []item
 	query         []rune
-	pos           int // query 内のカーソル位置(rune 単位)
+	pos           int // cursor position in query, in runes
 	matches       []match
 	cursor        int
 	offset        int
 	width, height int
 	chosen        *item
-	previews      map[string]string // id ごとに取得済みのペインの画面
+	previews      map[string]string // pane screens fetched so far, by item id
 
-	// goto は herdr の goto と同じく、最初は j/k で選び / で検索に入る。ランチャーは常に検索中
-	gotoMode  bool
-	searching bool
-	status    string // goto の b/w/i/d で絞り込む agent_status。空なら全部
+	// With --start select, like herdr's goto, j/k move and / starts a search. With search, it is always searching.
+	selectFirst bool
+	searching   bool
+	narrow      string // agent_status narrowed with b/w/i/d, or "commands" with c. Empty shows everything.
+
+	// What --sources includes. Keys that only make sense for a source are enabled and hinted only then.
+	hasCommands bool
+	hasPanes    bool
 }
 
 type previewMsg struct{ key, content string }
@@ -63,14 +49,21 @@ type searchTexts []item
 func (t searchTexts) String(i int) string { return t[i].searchText() }
 func (t searchTexts) Len() int            { return len(t) }
 
-func pick(items []item, gotoMode bool) (*item, error) {
-	// catppuccin の色が 256 色に丸められないようにする
+func pick(items []item, opts options) (*item, error) {
+	// Keep #rrggbb colors from being rounded to 256 colors.
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
-	m := model{items: items, previews: map[string]string{}, gotoMode: gotoMode, searching: !gotoMode}
+	selectFirst := opts.start == "select"
+	m := model{
+		items:       items,
+		previews:    map[string]string{},
+		selectFirst: selectFirst,
+		searching:   !selectFirst,
+		hasCommands: slices.Contains(opts.sources, "commands"),
+		hasPanes:    slices.Contains(opts.sources, "panes"),
+	}
 	m.filter()
-	// goto は今いるペインを選んだ状態で開く
-	if gotoMode {
+	if opts.cursor == "current" {
 		for i, mt := range m.matches {
 			if mt.item.focused {
 				m.cursor = i
@@ -87,7 +80,7 @@ func pick(items []item, gotoMode bool) (*item, error) {
 func (m *model) filter() {
 	var items searchTexts
 	for _, it := range m.items {
-		if m.status == "" || it.status == m.status {
+		if m.matchesFilter(it) {
 			items = append(items, it)
 		}
 	}
@@ -104,9 +97,20 @@ func (m *model) filter() {
 	m.cursor, m.offset = 0, 0
 }
 
+func (m model) matchesFilter(it item) bool {
+	switch m.narrow {
+	case "":
+		return true
+	case "commands":
+		return it.kind == "command"
+	default:
+		return it.status == m.narrow
+	}
+}
+
 func (m model) Init() tea.Cmd { return m.loadPreview() }
 
-// 選択中の候補のペインの画面をまだ取得していなければ、裏で取得する
+// Fetches the selected item's pane screen in the background unless it is cached.
 func (m model) loadPreview() tea.Cmd {
 	if len(m.matches) == 0 || m.previews == nil {
 		return nil
@@ -144,8 +148,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyDown, tea.KeyCtrlN:
 			m.move(1)
 		case tea.KeyEsc:
-			// goto の検索中は検索を抜けて j/k の操作に戻る
-			if !m.gotoMode || !m.searching {
+			// With --start select, esc while searching goes back to j/k navigation.
+			if !m.selectFirst || !m.searching {
 				return m, tea.Quit
 			}
 			m.searching = false
@@ -161,20 +165,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// herdr の goto の検索していないときの操作
+// Keys when not searching with --start select (the same as herdr's goto).
 func (m *model) navigate(msg tea.KeyMsg) {
-	switch msg.Type {
-	case tea.KeyLeft:
+	switch {
+	case msg.Type == tea.KeyLeft && m.hasPanes:
 		m.jumpGroup(-1)
 		return
-	case tea.KeyRight:
+	case msg.Type == tea.KeyRight && m.hasPanes:
 		m.jumpGroup(1)
 		return
-	case tea.KeyRunes:
-	default:
+	case msg.Type != tea.KeyRunes:
 		return
 	}
-	switch string(msg.Runes) {
+	key := string(msg.Runes)
+	switch key {
 	case "j":
 		m.move(1)
 	case "k":
@@ -182,13 +186,30 @@ func (m *model) navigate(msg tea.KeyMsg) {
 	case "/":
 		m.searching = true
 		m.pos = len(m.query)
-	case "b", "w", "i", "d", "a":
-		m.status = map[string]string{"b": "blocked", "w": "working", "i": "idle", "d": "done", "a": ""}[string(msg.Runes)]
-		m.filter()
+	default:
+		if narrow, ok := m.narrowKeys()[key]; ok {
+			m.narrow = narrow
+			m.filter()
+		}
 	}
 }
 
-// 前後のワークスペースの最初のペインへ移動する。端では折り返さない
+// Narrowing keys. Only panes have a status, and c only matters when commands and panes are mixed.
+func (m model) narrowKeys() map[string]string {
+	keys := map[string]string{}
+	if m.hasPanes {
+		keys["b"], keys["w"], keys["i"], keys["d"] = "blocked", "working", "idle", "done"
+	}
+	if m.hasCommands && m.hasPanes {
+		keys["c"] = "commands"
+	}
+	if len(keys) > 0 {
+		keys["a"] = ""
+	}
+	return keys
+}
+
+// Moves to the first pane of the previous/next workspace without wrapping around.
 func (m *model) jumpGroup(d int) {
 	if len(m.matches) == 0 {
 		return
@@ -217,7 +238,7 @@ func (m *model) jumpGroup(d int) {
 	m.cursor = i
 }
 
-// プロンプトは readline / emacs と同じキーで編集する
+// The prompt is edited with readline/emacs keys.
 func (m *model) editQuery(msg tea.KeyMsg) {
 	q, p := m.query, m.pos
 	switch {
@@ -262,7 +283,7 @@ func (m *model) setQuery(q []rune, pos int) {
 	m.filter()
 }
 
-// q[from:to] を r に置き換えた新しいスライスを返す
+// Returns a new slice with q[from:to] replaced by r.
 func splice(q []rune, from, to int, r []rune) []rune {
 	out := make([]rune, 0, len(q)-(to-from)+len(r))
 	out = append(out, q[:from]...)
@@ -270,7 +291,7 @@ func splice(q []rune, from, to int, r []rune) []rune {
 	return append(out, q[to:]...)
 }
 
-// カーソルの前の単語の先頭(空白を飛ばしてから、空白でない文字を遡る)
+// Start of the word before the cursor (skip spaces, then non-spaces backwards).
 func wordStart(q []rune, p int) int {
 	for p > 0 && q[p-1] == ' ' {
 		p--
@@ -281,7 +302,7 @@ func wordStart(q []rune, p int) int {
 	return p
 }
 
-// カーソルの後の単語の末尾
+// End of the word after the cursor.
 func wordEnd(q []rune, p int) int {
 	for p < len(q) && q[p] == ' ' {
 		p++
@@ -299,7 +320,7 @@ func (m *model) move(d int) {
 	m.cursor = min(max(m.cursor+d, 0), len(m.matches)-1)
 }
 
-// herdr の popup の枠を外枠として使い、中は区切り線だけで分ける
+// Uses the herdr popup border as the outer frame and splits the inside with dividers only.
 //
 //	 > query          │ title
 //	──────────────────┤ desc
@@ -309,26 +330,22 @@ func (m model) View() string {
 	if m.width == 0 {
 		return ""
 	}
-	// 狭いときはプレビューを出さない
+	// No preview when too narrow.
 	leftWidth := m.width
 	if m.width >= 60 {
 		leftWidth = m.width / 2
 	}
-	// 横線の行は、縦の区切り線と ┤ でつなげる
+	// Rows with a horizontal rule join the vertical divider with ┤.
 	var left []string
 	rules := map[int]bool{}
 	addRule := func() {
 		rules[len(left)] = true
 		left = append(left, dimStyle.Render(strings.Repeat("─", leftWidth)))
 	}
-	// 位置がずれないよう、入力欄は goto でも常に出す。goto の操作の説明と件数は下に控えめに出す
-	left = append(left, " "+m.promptLine(leftWidth-2))
+	// Always show the prompt so the list does not shift; key hints and counts go at the bottom, dimmed.
+	left = append(left, " "+m.promptLine())
 	addRule()
-	footerHeight := 0
-	if m.gotoMode {
-		footerHeight = 1
-	}
-	resultsHeight := max(m.height-len(left)-footerHeight, 0)
+	resultsHeight := max(m.height-len(left)-1, 0)
 	results := m.resultLines(leftWidth-1, resultsHeight)
 	for i := range resultsHeight {
 		line := ""
@@ -337,9 +354,7 @@ func (m model) View() string {
 		}
 		left = append(left, line)
 	}
-	if m.gotoMode {
-		left = append(left, " "+m.footerLine(leftWidth-2))
-	}
+	left = append(left, " "+m.footerLine(leftWidth-2))
 	if leftWidth == m.width {
 		return strings.Join(fitLines(left, leftWidth, m.height), "\n")
 	}
@@ -367,8 +382,8 @@ func (m model) View() string {
 	return strings.Join(lines, "\n")
 }
 
-// 各行を width ちょうどに切り詰めるか空白で埋め、height 行にする。
-// ペインの画面の色が隣に漏れないよう、行末で色をリセットする
+// Truncates or pads each line to exactly width and returns height lines.
+// Resets colors at the end of each line so pane colors do not bleed into the next column.
 func fitLines(lines []string, width, height int) []string {
 	out := make([]string, height)
 	for i := range out {
@@ -381,11 +396,11 @@ func fitLines(lines []string, width, height int) []string {
 	return out
 }
 
-func (m model) promptLine(width int) string {
-	// goto で / を押す前は入力できないので、> を暗くする
-	prefix := lipgloss.NewStyle().Foreground(flamingo)
+func (m model) promptLine() string {
+	// Dim the > until / is pressed, since typing is not possible before that.
+	prefix := lipgloss.NewStyle().Foreground(caretColor)
 	if !m.searching {
-		prefix = prefix.Foreground(surface2)
+		prefix = prefix.Foreground(faint)
 	}
 	prompt := prefix.Render("> ")
 	if m.searching {
@@ -393,32 +408,52 @@ func (m model) promptLine(width int) string {
 	} else {
 		prompt += titleStyle.Render(string(m.query))
 	}
-	// goto の件数は footerLine で右端に出す
-	if m.gotoMode {
-		return prompt
-	}
-	return spread(prompt, m.count(), width)
+	return prompt
 }
 
-func (m model) count() string {
-	return dimStyle.Render(fmt.Sprintf("%d / %d", len(m.matches), len(m.items)))
-}
-
-// goto の一番下の行。操作の説明を出し、右端に絞り込み中の状態と件数を出す
+// The bottom line: key hints, with the active filter and the count on the right.
 func (m model) footerLine(width int) string {
-	help := "/ search  b/w/i/d filter  a all  ←/→ workspace  enter jump"
-	if m.searching {
-		help = "esc done  ctrl-n/p move  enter jump"
-	}
-	faint := lipgloss.NewStyle().Foreground(surface2)
+	help := strings.Join(m.help(), "  ")
+	faint := lipgloss.NewStyle().Foreground(faint)
 	right := faint.Render(fmt.Sprintf("%d / %d", len(m.matches), len(m.items)))
-	if m.status != "" {
-		right = lipgloss.NewStyle().Foreground(statusColor(m.status)).Render("● "+m.status) + "  " + right
+	switch m.narrow {
+	case "":
+	case "commands":
+		right = lipgloss.NewStyle().Foreground(kindColor("command")).Render("commands") + "  " + right
+	default:
+		right = lipgloss.NewStyle().Foreground(statusColor(m.narrow)).Render("● "+m.narrow) + "  " + right
 	}
 	return spread(faint.Render(help), right, width)
 }
 
-// left を左端、right を右端に置く。入りきらなければ right を省く
+// Hints only the keys that work in the current state.
+func (m model) help() []string {
+	enter := "enter select"
+	if m.searching {
+		esc := "esc close"
+		if m.selectFirst {
+			esc = "esc done"
+		}
+		return []string{esc, "ctrl-n/p move", enter}
+	}
+	help := []string{"/ search"}
+	keys := m.narrowKeys()
+	var narrow []string
+	for _, k := range []string{"b", "w", "i", "d", "c"} {
+		if _, ok := keys[k]; ok {
+			narrow = append(narrow, k)
+		}
+	}
+	if len(narrow) > 0 {
+		help = append(help, strings.Join(narrow, "/")+" filter", "a all")
+	}
+	if m.hasPanes {
+		help = append(help, "←/→ workspace")
+	}
+	return append(help, enter)
+}
+
+// Puts left at the left edge and right at the right edge, dropping right if it does not fit.
 func spread(left, right string, width int) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -427,7 +462,7 @@ func spread(left, right string, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// カーソル位置の文字を反転させて描画する
+// Draws the character under the cursor in reverse.
 func (m model) queryWithCursor() string {
 	under := " "
 	if m.pos < len(m.query) {
@@ -438,7 +473,7 @@ func (m model) queryWithCursor() string {
 		after = string(m.query[m.pos+1:])
 	}
 	return titleStyle.Render(string(m.query[:m.pos])) +
-		lipgloss.NewStyle().Foreground(base).Background(text).Render(under) +
+		lipgloss.NewStyle().Foreground(cursorFg).Background(fg).Render(under) +
 		titleStyle.Render(after)
 }
 
@@ -456,7 +491,7 @@ func (m *model) resultLines(width, height int) []string {
 	return lines
 }
 
-// herdr の status_indicators = "dots" と同じく、エージェントの状態を色付きの点で表す
+// Shows agent status as a colored dot, like herdr's status_indicators = "dots".
 func statusColor(status string) lipgloss.Color {
 	switch status {
 	case "working":
@@ -466,37 +501,37 @@ func statusColor(status string) lipgloss.Color {
 	case "done":
 		return green
 	default: // idle, unknown
-		return overlay0
+		return dim
 	}
 }
 
-// 種類の列は sidebar と同じく claude を peach、codex を blue にする
+// Like herdr's sidebar, the kind column shows claude in orange (catppuccin peach) and codex in blue.
 func kindColor(kind string) lipgloss.Color {
 	switch kind {
 	case "claude":
-		return peach
+		return orange
 	case "codex":
 		return blue
 	case "command":
 		return green
 	default:
-		return subtext0
+		return subtle
 	}
 }
 
-// 選択行は背景色を行末まで伸ばすため、文字ごとに背景色付きで描画する
+// Each character carries the background so the selected row's highlight reaches the end of the line.
 func resultLine(mt match, selected bool, width int) string {
 	bg := func(s lipgloss.Style) lipgloss.Style {
 		if selected {
-			return s.Background(surface0)
+			return s.Background(selectionBg)
 		}
 		return s
 	}
-	base := bg(lipgloss.NewStyle().Foreground(text))
-	hit := bg(lipgloss.NewStyle().Foreground(blue).Bold(true))
+	base := bg(lipgloss.NewStyle().Foreground(fg))
+	hit := bg(lipgloss.NewStyle().Foreground(accent).Bold(true))
 	caret := base.Render("  ")
 	if selected {
-		caret = bg(lipgloss.NewStyle().Foreground(flamingo)).Render("> ")
+		caret = bg(lipgloss.NewStyle().Foreground(caretColor)).Render("> ")
 	}
 	matched := map[int]bool{}
 	for _, i := range mt.indexes {
@@ -509,7 +544,7 @@ func resultLine(mt match, selected bool, width int) string {
 	} else {
 		b.WriteString(base.Render("  "))
 	}
-	offset := 0 // label 内のバイト位置。fuzzy の一致位置はバイト単位
+	offset := 0 // byte offset in label; fuzzy match positions are byte offsets
 	for _, c := range mt.item.columns {
 		style := bg(lipgloss.NewStyle().Foreground(c.color))
 		for i, r := range c.text {
@@ -528,7 +563,7 @@ func resultLine(mt match, selected bool, width int) string {
 	return line
 }
 
-// ペインの画面は末尾の空行を除き、入りきらなければ下側(入力欄のある側)を残す
+// Drops trailing blank lines of the pane screen and keeps the bottom (where the prompt is) if it does not fit.
 func screenLines(content string, height int) []string {
 	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {

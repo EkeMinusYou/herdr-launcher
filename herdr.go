@@ -1,11 +1,13 @@
 package main
 
-// herdr の CLI でペインの一覧を取得し、選んだペインへ移動する
+// Lists panes with the herdr CLI and focuses the chosen one with the socket API's pane.focus.
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -37,10 +39,6 @@ type pane struct {
 	Focused     bool   `json:"focused"`
 }
 
-type rect struct {
-	X, Y, Width, Height int
-}
-
 func herdrBin() string {
 	if bin := os.Getenv("HERDR_BIN_PATH"); bin != "" {
 		return bin
@@ -56,7 +54,7 @@ func herdr(args ...string) error {
 	return nil
 }
 
-// herdr の JSON 応答の result を out に読み込む
+// Decodes the result of a herdr JSON response into out.
 func herdrJSON(out any, args ...string) error {
 	b, err := exec.Command(herdrBin(), args...).Output()
 	if err != nil {
@@ -71,8 +69,8 @@ func herdrJSON(out any, args ...string) error {
 	return json.Unmarshal(resp.Result, out)
 }
 
-// 現在のペインを移動先の候補にする。取得に失敗したときは候補に出さない。
-// herdr はワークスペースの順にペインを返すので、その順のまま並べる
+// Turns the current panes into items. Anything that fails to load is left out.
+// herdr returns panes in workspace order, which is kept as is.
 func paneItems() []item {
 	var (
 		ws struct {
@@ -101,14 +99,14 @@ func paneItems() []item {
 	}
 	branches := gitBranches(ps.Panes)
 
-	// ワークスペース名とタブ名の列幅を揃える
+	// Align the workspace and tab columns.
 	wsWidth, tabWidth := 0, 0
 	for _, p := range ps.Panes {
 		wsWidth = max(wsWidth, ansi.StringWidth(wsLabel[p.WorkspaceID]))
 		tabWidth = max(tabWidth, ansi.StringWidth(tabLabel[p.TabID]))
 	}
 
-	// overlay で開いた場合はランチャー自身もペインなので除き、開く前にいたペインを現在のペインとする
+	// When opened as an overlay the launcher is itself a pane, so skip it and treat the pane it was opened from as current.
 	self, here := os.Getenv("HERDR_PANE_ID"), launchedFrom()
 	var items []item
 	for _, p := range ps.Panes {
@@ -134,22 +132,22 @@ func paneItems() []item {
 			title:  name,
 			columns: []column{
 				kindColumn(kind),
-				{pad(ws, wsWidth) + "  ", text},
-				{pad(tb, tabWidth) + "  ", subtext0},
-				{name, text},
+				{pad(ws, wsWidth) + "  ", fg},
+				{pad(tb, tabWidth) + "  ", subtle},
+				{name, fg},
 			},
 			extra:   branches[p.Cwd] + " " + p.Cwd,
 			group:   p.WorkspaceID,
 			focused: p.Focused,
 			desc:    desc,
-			run:     func() error { return afterClose("focus-pane", p.ID, p.TabID, p.Agent) },
+			run:     func() error { return afterClose("focus-pane", p.ID) },
 			preview: func() (string, error) { return readPane(p.ID) },
 		})
 	}
 	return items
 }
 
-// 各ペインの cwd のブランチを並行して調べる。git リポジトリでなければ空
+// Looks up the git branch of each pane's cwd in parallel. Empty outside a git repository.
 func gitBranches(panes []pane) map[string]string {
 	cwds := map[string]bool{}
 	for _, p := range panes {
@@ -175,7 +173,7 @@ func gitBranches(panes []pane) map[string]string {
 	return branches
 }
 
-// ランチャーを開いたときにフォーカスしていたペイン
+// The pane that was focused when the launcher opened.
 func launchedFrom() string {
 	var ctx struct {
 		FocusedPaneID string `json:"focused_pane_id"`
@@ -191,7 +189,7 @@ func current(focused bool) string {
 	return ""
 }
 
-// エージェントがいれば作業内容、いなければラベルかディレクトリ名で表す
+// The agent's task title if there is an agent, otherwise the label or directory name.
 func paneName(p pane) string {
 	if p.Agent != "" && p.Title != "" {
 		return p.Title
@@ -202,72 +200,50 @@ func paneName(p pane) string {
 	return p.Cwd[strings.LastIndex(p.Cwd, "/")+1:]
 }
 
-// エージェントのペインは agent focus で直接移動できる。
-// それ以外はペイン ID で移動する CLI がないため、タブへ移動してから上下左右の移動でたどり着く
-func focusPane(p pane) error {
-	if p.Agent != "" {
-		return herdr("agent", "focus", p.ID)
+// pane.focus jumps straight to a pane by id, even in another workspace or tab.
+// The CLI does not expose it, so send it to the socket directly.
+func focusPane(paneID string) error {
+	path := os.Getenv("HERDR_SOCKET_PATH")
+	if path == "" {
+		return errors.New("HERDR_SOCKET_PATH is not set")
 	}
-	if err := herdr("tab", "focus", p.TabID); err != nil {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
 		return err
 	}
-	for range 10 {
-		l, err := layoutOf(p.ID)
-		if err != nil {
-			return err
-		}
-		focused := l.FocusedPaneID
-		if focused == p.ID {
-			return nil
-		}
-		rects := map[string]rect{}
-		for _, lp := range l.Panes {
-			rects[lp.ID] = lp.Rect
-		}
-		if err := herdr("pane", "focus", "--direction", direction(rects[focused], rects[p.ID]), "--pane", focused); err != nil {
-			return err
-		}
+	defer conn.Close()
+	req, err := json.Marshal(map[string]any{"id": "launcher", "method": "pane.focus", "params": map[string]string{"pane_id": paneID}})
+	if err != nil {
+		return err
 	}
-	return errors.New("could not reach pane " + p.ID)
-}
-
-type paneLayout struct {
-	FocusedPaneID string `json:"focused_pane_id"`
-	Panes         []struct {
-		ID   string `json:"pane_id"`
-		Rect rect   `json:"rect"`
-	} `json:"panes"`
-}
-
-func layoutOf(paneID string) (paneLayout, error) {
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return err
+	}
 	var resp struct {
-		Layout paneLayout `json:"layout"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	err := herdrJSON(&resp, "pane", "layout", "--pane", paneID)
-	return resp.Layout, err
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("pane.focus %s: %s", paneID, resp.Error.Message)
+	}
+	return nil
 }
 
-// ペインに今見えている画面を色付きで取得する
+// Reads what the pane currently shows, with colors.
 func readPane(paneID string) (string, error) {
 	b, err := exec.Command(herdrBin(), "pane", "read", paneID, "--source", "visible", "--format", "ansi").Output()
 	if err != nil {
 		return "", fmt.Errorf("herdr pane read %s: %w", paneID, err)
 	}
 	return strings.ReplaceAll(string(b), "\r", ""), nil
-}
-
-// from から to へ向かう方向。左右に重なっていなければ左右、重なっていれば上下に動く
-func direction(from, to rect) string {
-	switch {
-	case to.X+to.Width <= from.X:
-		return "left"
-	case to.X >= from.X+from.Width:
-		return "right"
-	case to.Y+to.Height <= from.Y:
-		return "up"
-	default:
-		return "down"
-	}
 }
 
 func shortenHome(path string) string {
