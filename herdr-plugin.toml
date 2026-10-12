@@ -1,0 +1,42 @@
+# よく使うツールやコマンドの実行と、ペインへの移動を telescope 風のピッカーで選ぶランチャー
+# keys.command の popup はタイトルが "popup" 固定のため、lazygit / nvim もタイトルを指定できるプラグインペインで開く
+id = "launcher"
+name = "Launcher"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
+platforms = ["macos", "linux"]
+
+[[panes]]
+id = "launcher"
+title = "launcher"
+placement = "popup"
+width = "80%"
+height = "90%"
+# --cwd を渡すと作業ディレクトリがプラグインのディレクトリでなくなるため、絶対パスで実行する
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/run.sh\""]
+
+# herdr の goto (prefix+g) の代わりにペインだけを選んで移動する
+[[panes]]
+id = "goto"
+title = "goto"
+placement = "popup"
+width = "80%"
+height = "90%"
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/run.sh\" --goto"]
+
+[[panes]]
+id = "lazygit"
+title = "lazygit"
+placement = "popup"
+width = "100%"
+height = "100%"
+command = ["lazygit"]
+
+[[panes]]
+id = "nvim"
+title = "neovim"
+placement = "popup"
+width = "100%"
+height = "100%"
+command = ["nvim"]
