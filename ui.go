@@ -1,7 +1,7 @@
 package main
 
-// nvim の telescope (horizontal, prompt_position = top, sorting_strategy = ascending) と
-// catppuccin-mocha の配色に揃えたピッカー
+// nvim の telescope (horizontal, prompt_position = top, sorting_strategy = ascending) の配置と
+// catppuccin-mocha の配色に揃えたピッカー。外枠は herdr の popup の枠を使う
 
 import (
 	"fmt"
@@ -29,9 +29,8 @@ var (
 	peach    = lipgloss.Color("#fab387")
 	subtext0 = lipgloss.Color("#a6adc8")
 
-	borderStyle = lipgloss.NewStyle().Foreground(blue)
-	titleStyle  = lipgloss.NewStyle().Foreground(text)
-	dimStyle    = lipgloss.NewStyle().Foreground(overlay0)
+	titleStyle = lipgloss.NewStyle().Foreground(text)
+	dimStyle   = lipgloss.NewStyle().Foreground(overlay0)
 )
 
 type match struct {
@@ -299,6 +298,12 @@ func (m *model) move(d int) {
 	m.cursor = min(max(m.cursor+d, 0), len(m.matches)-1)
 }
 
+// herdr の popup の枠を外枠として使い、中は区切り線だけで分ける
+//
+//	 > query          │ title
+//	──────────────────┤ desc
+//	 > result         │──────
+//	   result         │ screen
 func (m model) View() string {
 	if m.width == 0 {
 		return ""
@@ -308,35 +313,49 @@ func (m model) View() string {
 	if m.width >= 60 {
 		leftWidth = m.width / 2
 	}
-	const promptHeight = 3
-	resultsHeight := m.height - promptHeight
-
-	left := lipgloss.JoinVertical(lipgloss.Left,
-		box(m.name(), []string{m.promptLine(leftWidth - 2)}, leftWidth, promptHeight),
-		box("Results", m.resultLines(leftWidth-2, resultsHeight-2), leftWidth, resultsHeight),
-	)
-	if leftWidth == m.width {
-		return left
+	left := []string{" " + m.promptLine(leftWidth-2), dimStyle.Render(strings.Repeat("─", leftWidth))}
+	for _, l := range m.resultLines(leftWidth-1, m.height-2) {
+		left = append(left, " "+l)
 	}
-	previewTitle := "Preview"
-	var preview []string
+	if leftWidth == m.width {
+		return strings.Join(fitLines(left, leftWidth, m.height), "\n")
+	}
+
+	rightWidth := m.width - leftWidth - 1
+	var right []string
 	if len(m.matches) > 0 {
 		it := m.matches[m.cursor].item
-		previewTitle = it.title
-		preview = previewLines(it, m.width-leftWidth-4)
+		right = append(right, " "+titleStyle.Bold(true).Render(it.title))
+		right = append(right, previewLines(it, rightWidth-2)...)
 		if content, ok := m.previews[it.id]; ok {
-			preview = append(preview, dimStyle.Render(strings.Repeat("─", m.width-leftWidth-2)))
-			preview = append(preview, screenLines(content, m.height-2-len(preview))...)
+			right = append(right, dimStyle.Render(strings.Repeat("─", rightWidth)))
+			right = append(right, screenLines(content, m.height-len(right))...)
 		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, box(previewTitle, preview, m.width-leftWidth, m.height))
+	left, right = fitLines(left, leftWidth, m.height), fitLines(right, rightWidth, m.height)
+	lines := make([]string, m.height)
+	for i := range lines {
+		divider := "│"
+		if i == 1 {
+			divider = "┤" // 入力欄の下の横線とつなげる
+		}
+		lines[i] = left[i] + dimStyle.Render(divider) + right[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
-func (m model) name() string {
-	if m.gotoMode {
-		return "Goto"
+// 各行を width ちょうどに切り詰めるか空白で埋め、height 行にする。
+// ペインの画面の色が隣に漏れないよう、行末で色をリセットする
+func fitLines(lines []string, width, height int) []string {
+	out := make([]string, height)
+	for i := range out {
+		line := ""
+		if i < len(lines) {
+			line = ansi.Truncate(lines[i], width, "") + "\x1b[0m"
+		}
+		out[i] = line + strings.Repeat(" ", max(width-ansi.StringWidth(line), 0))
 	}
-	return "Launcher"
+	return out
 }
 
 func (m model) promptLine(width int) string {
@@ -497,22 +516,4 @@ func previewLines(it item, width int) []string {
 		add(dimStyle, "in "+shortenHome(cwd))
 	}
 	return lines
-}
-
-// telescope と同じく、上辺にタイトルを埋め込んだ角丸の枠
-func box(title string, body []string, width, height int) string {
-	inner := width - 2
-	label := ansi.Truncate(" "+title+" ", max(inner-1, 0), "")
-	rest := max(inner-1-ansi.StringWidth(label), 0)
-	lines := []string{borderStyle.Render("╭─") + titleStyle.Render(label) + borderStyle.Render(strings.Repeat("─", rest)+"╮")}
-	for i := range max(height-2, 0) {
-		line := ""
-		if i < len(body) {
-			line = ansi.Truncate(body[i], inner, "") + "\x1b[0m"
-		}
-		line += strings.Repeat(" ", max(inner-ansi.StringWidth(line), 0))
-		lines = append(lines, borderStyle.Render("│")+line+borderStyle.Render("│"))
-	}
-	lines = append(lines, borderStyle.Render("╰"+strings.Repeat("─", inner)+"╯"))
-	return strings.Join(lines, "\n")
 }
