@@ -41,7 +41,7 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.5.0
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.6.0
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary (except on Windows, where you rebuild it by hand).
@@ -122,7 +122,8 @@ cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.t
 # "catppuccin" (herdr's default theme) or "ansi" (your terminal's 16 colors)
 theme = "catppuccin"
 
-# Optional per-color overrides: #rrggbb or a terminal color number
+# Optional per-color overrides: #rrggbb or a terminal color number.
+# bg is the launcher's background; "none" leaves the terminal's.
 [colors]
 accent = "#89b4fa"
 

@@ -514,7 +514,11 @@ func (m model) render() string {
 	}
 	left = append(left, " "+m.footerLine(leftWidth-2))
 	if leftWidth == m.width {
-		return strings.Join(fitLines(left, leftWidth, m.height), "\n")
+		lines := fitLines(left, leftWidth, m.height)
+		for i, l := range lines {
+			lines[i] = withBackground(l)
+		}
+		return strings.Join(lines, "\n")
 	}
 
 	rightWidth := m.width - leftWidth - 1
@@ -540,7 +544,7 @@ func (m model) render() string {
 		if rules[i] {
 			divider = "┤"
 		}
-		lines[i] = left[i] + dimStyle.Render(divider) + right[i]
+		lines[i] = withBackground(left[i] + dimStyle.Render(divider) + right[i])
 	}
 	return strings.Join(lines, "\n")
 }

@@ -776,3 +776,48 @@ func TestNoCommandsHint(t *testing.T) {
 		t.Errorf("with commands: %q should offer c", got)
 	}
 }
+
+func TestResetsBackground(t *testing.T) {
+	for params, want := range map[string]bool{
+		"":                true,  // \x1b[m
+		"0":               true,  // reset
+		"0;32":            true,  // reset, then a foreground
+		"49":              true,  // default background
+		"32":              false, // foreground only
+		"38;2;49;50;68":   false, // 49 is a color component, not the default background
+		"48;2;49;50;68":   false, // a background of its own
+		"0;48;5;236":      false, // reset, then a background of its own
+		"44":              false,
+		"104":             false,
+		"38;5;0":          false, // 0 is a color number
+		"1;38:2::255:0:0": false,
+	} {
+		if got := resetsBackground(params); got != want {
+			t.Errorf("%q: got %v, want %v", params, got, want)
+		}
+	}
+}
+
+// The picker's background is painted behind every cell, including after the resets in pane screens,
+// and leaves the selected row's own background alone.
+func TestBackground(t *testing.T) {
+	defer applyTheme("catppuccin", palette{})
+	applyTheme("catppuccin", palette{Bg: "#010203"})
+	bg := "\x1b[48;2;1;2;3m"
+	if got := withBackground("a\x1b[0mb\x1b[48;2;49;50;68mc\x1b[mx"); got != bg+"a\x1b[0m"+bg+"b\x1b[48;2;49;50;68mc\x1b[m"+bg+"x" {
+		t.Errorf("got %q", got)
+	}
+	m := model{items: gotoItems(), previews: map[string]string{"a1": "\x1b[31mred\x1b[0m line"}, hasPanes: true}
+	m.width, m.height = 100, 10
+	m.filter()
+	for i, l := range strings.Split(m.render(), "\n") {
+		if !strings.HasPrefix(l, bg) || ansi.StringWidth(l) != m.width {
+			t.Errorf("line %d does not start with the background or is not %d wide: %q", i, m.width, l)
+		}
+	}
+	// "none" leaves the terminal's background.
+	applyTheme("catppuccin", palette{Bg: "none"})
+	if got := withBackground("a\x1b[0mb"); got != "a\x1b[0mb" {
+		t.Errorf("none: got %q", got)
+	}
+}

@@ -10,8 +10,10 @@
 theme = "catppuccin"
 
 # Override individual theme colors with #rrggbb or a terminal color number ("4").
-# Keys: fg, subtle, dim, faint, selection_bg, cursor_fg, accent, caret,
+# Keys: bg, fg, subtle, dim, faint, selection_bg, cursor_fg, accent, caret,
 #       green, mauve, teal, yellow, red, orange, blue
+# bg is the background of the whole launcher (catppuccin paints it a step darker than herdr's so the
+# popup stands out); bg = "none" leaves the terminal's background.
 # [colors]
 # accent = "#89b4fa"
 
