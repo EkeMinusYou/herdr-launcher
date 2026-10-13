@@ -14,18 +14,18 @@ It ships two entry points:
 ## Features
 
 - Every agent and terminal pane on its own row, with aligned workspace / tab / name columns, agent kind (`claude`, `codex`, `terminal`, …) and status dots (working, blocked, idle, done)
-- Preview of the selected pane's current screen, its cwd and git branch
+- Live preview of the selected pane's screen (refreshed every 0.5 s), its cwd and git branch
 - fzf's matching algorithm and extended search syntax
-- Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status) and readline/emacs editing in the prompt
-- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or panes such as a lazygit popup, including panes of other plugins
+- Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status), readline/emacs editing in the prompt, and the mouse
+- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, with their output shown in the preview, or panes such as a lazygit popup, including panes of other plugins
 - `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
 - Fast: it talks to herdr's socket directly and shows the first frame in about 30 ms
 
 ## Requirements
 
 - herdr 0.9.0 or later
-- macOS or Linux
-- `curl` or `wget`, to download the prebuilt binary (or Go 1.27 or later, to build it from source)
+- macOS, Linux or Windows
+- `curl` or `wget` on macOS and Linux, or PowerShell on Windows, to download the prebuilt binary (or Go 1.27 or later, to build it from source)
 - Optional: `lazygit` and `gh` for the default commands
 
 ## Install
@@ -34,7 +34,7 @@ It ships two entry points:
 herdr plugin install EkeMinusYou/herdr-launcher
 ```
 
-The install downloads the prebuilt `bin/launcher` for the plugin version from GitHub Releases and checks it against `SHA256SUMS`. To build it from source with Go instead, set `LAUNCHER_FROM_SOURCE=1` for the install.
+The install downloads the prebuilt `bin/launcher.exe` (named `.exe` on every platform) for the plugin version from GitHub Releases and checks it against `SHA256SUMS`. To build it from source with Go instead, set `LAUNCHER_FROM_SOURCE=1` for the install.
 
 To update, run the install again. It replaces the installed version and keeps your config. Add `--ref` with a [release](https://github.com/EkeMinusYou/herdr-launcher/releases) tag to pick a version.
 
@@ -42,15 +42,15 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.3.1
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.4.0
 ```
 
-To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.
+To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary (except on Windows, where you rebuild it by hand).
 
 ```sh
 git clone https://github.com/EkeMinusYou/herdr-launcher
 cd herdr-launcher
-go build -o bin/launcher .
+go build -o bin/launcher.exe .
 herdr plugin link "$PWD"
 ```
 
@@ -100,6 +100,9 @@ By default, both entry points start in select mode.
 | `/` | Start searching |
 | `enter` | Run the command or jump to the pane |
 | `q`, `esc` | Close |
+| Click, wheel | Select a row (click it again to run it), move the selection |
+
+A shell command runs while the launcher stays open, and its output and exit status appear in the preview. Run it again with `enter`, or close the launcher when you are done; closing stops a command that is still running. A command with `close = true` closes the launcher when it succeeds, and stays open to show the output when it fails. Commands that need the terminal, such as `htop`, can set `interactive = true` to run in the launcher's terminal instead.
 
 While searching, the prompt is edited with readline keys: `ctrl-a` / `ctrl-e`, `ctrl-b` / `ctrl-f`, `alt-b` / `alt-f`, `ctrl-h`, `ctrl-d`, `ctrl-w`, `alt-d`, `ctrl-u`, `ctrl-k`. `esc` leaves the search and keeps the filtered list.
 
@@ -134,11 +137,21 @@ theme = "catppuccin"
 [colors]
 accent = "#89b4fa"
 
-# A shell command, run with `sh -c` in the directory of the pane you opened the launcher from
+# A shell command, run with `sh -c` (`cmd /c` on Windows) in the directory of the pane you opened
+# the launcher from. Its output shows in the preview.
 [[commands]]
 name = "gh browse"
 description = "Open the repository in the browser"
 command = "gh browse"
+# Close the launcher when it succeeds (on failure it stays open to show the output)
+close = true
+
+# A command that needs the terminal runs there instead, and the launcher closes when it exits
+[[commands]]
+name = "htop"
+description = "Show processes"
+command = "htop"
+interactive = true
 
 # Or one of this plugin's popup panes (lazygit)
 [[commands]]
@@ -207,15 +220,15 @@ Errors that happen where they cannot be shown, such as a pane list that fails to
 ## Limitations
 
 - Jumping to a pane uses `pane.focus` from herdr's socket API. It is in herdr's API schema but not yet in its documentation or CLI, so it may change.
-- The preview shows the pane as it was when the launcher opened; it does not refresh.
 - herdr's popup border can break where wide characters (such as Japanese) of the pane behind it touch the border. This comes from herdr's rendering.
-- macOS and Linux only (arm64 and amd64).
+- Prebuilt binaries are for macOS, Linux and Windows on arm64 and amd64.
+- Windows support follows herdr's plugin documentation but has only been checked by building and testing on Windows in CI, not with herdr on Windows.
 
 ## Development
 
 ```sh
 go test ./...
-go build -o bin/launcher .
+go build -o bin/launcher.exe .
 ```
 
 To release, bump `version` in [herdr-plugin.toml](herdr-plugin.toml) and push a matching tag (`v0.1.0`). GitHub Actions runs GoReleaser, which uploads the binaries and `SHA256SUMS`. Release binaries never rebuild themselves.

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Put the prebuilt launcher for this plugin version into bin/. herdr runs this as the plugin's build step.
+# Put the prebuilt launcher for this plugin version into bin/. herdr runs this as the plugin's build step
+# on macOS and Linux (scripts/fetch-launcher.ps1 on Windows). The binary is named launcher.exe everywhere
+# so that one manifest command works on every platform.
 #
 # Modes, in order:
-#   1. matching binary already installed           -> exit 0
-#   2. LAUNCHER_FROM_SOURCE=1 is set               -> go build (self-rebuilding, like a linked checkout)
+#   1. LAUNCHER_FROM_SOURCE=1 is set               -> go build (self-rebuilding, like a linked checkout)
+#   2. matching binary already installed           -> exit 0
 #   3. download the release asset and verify it against SHA256SUMS
 set -euo pipefail
 
@@ -13,13 +15,13 @@ version="$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml | head -1)"
 mkdir -p bin
 
 if [ -n "${LAUNCHER_FROM_SOURCE:-}" ]; then
-  go build -o bin/launcher .
+  go build -o bin/launcher.exe .
   rm -f bin/launcher.version
   echo "built launcher from source"
   exit 0
 fi
 
-if [ -x bin/launcher ] && [ "$(cat bin/launcher.version 2>/dev/null || true)" = "$version" ]; then
+if [ -x bin/launcher.exe ] && [ "$(cat bin/launcher.version 2>/dev/null || true)" = "$version" ]; then
   echo "launcher $version already installed"
   exit 0
 fi
@@ -61,6 +63,6 @@ fi
 [ "$actual" = "$expected" ] || { echo "sha256 mismatch for $asset: expected $expected, got $actual" >&2; exit 1; }
 
 chmod +x "$tmp/$asset"
-mv "$tmp/$asset" bin/launcher
+mv "$tmp/$asset" bin/launcher.exe
 echo "$version" > bin/launcher.version
 echo "installed launcher $version ($target)"

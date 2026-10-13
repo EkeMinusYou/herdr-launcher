@@ -10,9 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
@@ -28,9 +28,11 @@ type item struct {
 	group   string // unit for jumping to the previous/next workspace
 	focused bool
 	desc    string
-	command string // command shown in the preview; empty for panes
-	run     func() error
+	command string                 // shell command; empty for panes
+	run     func() error           // runs once the picker has closed; nil for commands that run inside it
 	preview func() (string, error) // screen shown in the preview; nil shows none
+
+	closeOnSuccess bool // for a command run inside the picker: close the picker once it succeeds
 }
 
 // One column of a list row. text is padded to the column width so columns line up.
@@ -110,6 +112,18 @@ func main() {
 		opts   options
 		hist   = loadHistory(historyPath())
 	)
+	// Records a pick for frecency. Commands that run inside the picker are recorded when they start.
+	record := func(id string) {
+		path := historyPath()
+		if path == "" {
+			return
+		}
+		listed := map[string]bool{}
+		for _, it := range items {
+			listed[it.id] = true
+		}
+		logError(hist.record(path, id, time.Now(), listed, opts.sources))
+	}
 	err := rebuildIfStale()
 	if err == nil {
 		chdirToFocusedPane()
@@ -124,20 +138,14 @@ func main() {
 			items, err = collect(opts, cfg, hist)
 		}
 		if err == nil {
-			chosen, err = pick(items, opts)
+			chosen, err = pick(items, opts, record)
 		}
 	}
 	if err == nil && chosen == nil {
 		return
 	}
 	if err == nil {
-		if path := historyPath(); path != "" {
-			listed := map[string]bool{}
-			for _, it := range items {
-				listed[it.id] = true
-			}
-			logError(hist.record(path, chosen.id, time.Now(), listed, opts.sources))
-		}
+		record(chosen.id)
 		err = chosen.run()
 	}
 	if err != nil {
@@ -178,8 +186,9 @@ var releaseVersion string
 
 // plugin link does not build, so rebuild when a source file is newer than the binary and re-exec the new binary.
 // The very first binary still has to be built by hand with go build.
+// Windows cannot replace a running executable, so there it is rebuilt by hand.
 func rebuildIfStale() error {
-	if releaseVersion != "" {
+	if releaseVersion != "" || runtime.GOOS == "windows" {
 		return nil
 	}
 	self, err := os.Executable()
@@ -211,7 +220,7 @@ func rebuildIfStale() error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go build: %w\n%s", err, out)
 	}
-	return syscall.Exec(self, os.Args, os.Environ())
+	return reexec(self)
 }
 
 // Plugin panes start in the plugin directory; move to the cwd of the pane the launcher was opened from so commands run there.
@@ -229,23 +238,22 @@ func pluginID() string {
 	return "ekeminusyou.launcher"
 }
 
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+// Runs an interactive command in the launcher's terminal after the picker has closed.
+func runInTerminal(command string) error {
+	cmd := shellCommand(command)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 // Only one popup can be open at a time, and an overlay restores the previous focus when it closes.
 // To work with both, opening another plugin pane or focusing a pane happens after the launcher has closed.
-// Closing stops processes in the same session, so hand the work to a copy of this binary in a new session.
+// Closing stops the popup's processes, so hand the work to a detached copy of this binary.
 func afterClose(args ...string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(self, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd.Start()
+	return startDetached(self, args...)
 }
 
 func openPane(plugin, entrypoint string) error {

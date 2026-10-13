@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"image/color"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -26,10 +28,14 @@ type model struct {
 	pos           int // cursor position in query, in runes
 	matches       []match
 	cursor        int
-	offset        int
 	width, height int
 	chosen        *item
 	previews      map[string]string // pane screens fetched so far, by item id
+	fetching      map[string]bool   // pane screens being fetched, so a refresh does not pile up
+	outputs       map[string]*commandOutput
+	proc          *exec.Cmd       // the command running inside the picker, if any
+	outputCh      <-chan tea.Msg  // its output and exit
+	record        func(id string) // records a pick for frecency
 
 	// With start = "select", like herdr's goto, j/k move and / starts a search. With "search", it is always searching.
 	selectFirst bool
@@ -43,11 +49,21 @@ type model struct {
 
 type previewMsg struct{ key, content string }
 
-func pick(items []item, opts options) (*item, error) {
+type tickMsg struct{}
+
+// How often the selected pane's screen is read again while the picker is open.
+const refreshInterval = 500 * time.Millisecond
+
+func tick() tea.Cmd { return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return tickMsg{} }) }
+
+func pick(items []item, opts options, record func(id string)) (*item, error) {
 	selectFirst := opts.start == "select"
 	m := model{
 		items:       items,
 		previews:    map[string]string{},
+		fetching:    map[string]bool{},
+		outputs:     map[string]*commandOutput{},
+		record:      record,
 		selectFirst: selectFirst,
 		searching:   !selectFirst,
 		hasCommands: slices.Contains(opts.sources, "commands"),
@@ -65,7 +81,11 @@ func pick(items []item, opts options) (*item, error) {
 	if err != nil {
 		return nil, err
 	}
-	return result.(model).chosen, nil
+	final := result.(model)
+	if final.proc != nil {
+		stopCommand(final.proc) // closing the picker stops a command still running in it
+	}
+	return final.chosen, nil
 }
 
 func (m *model) filter() {
@@ -83,7 +103,7 @@ func (m *model) filter() {
 	} else {
 		m.matches = search(items, string(m.query))
 	}
-	m.cursor, m.offset = 0, 0
+	m.cursor = 0
 }
 
 func (m model) matchesFilter(it item) bool {
@@ -97,17 +117,29 @@ func (m model) matchesFilter(it item) bool {
 	}
 }
 
-func (m model) Init() tea.Cmd { return m.loadPreview() }
+func (m model) Init() tea.Cmd { return tea.Batch(m.loadPreview(), tick()) }
 
 // Fetches the selected item's pane screen in the background unless it is cached.
 func (m model) loadPreview() tea.Cmd {
+	if len(m.matches) == 0 {
+		return nil
+	}
+	if _, ok := m.previews[m.matches[m.cursor].item.id]; ok {
+		return nil
+	}
+	return m.fetchPreview()
+}
+
+// Fetches the selected item's pane screen in the background, unless a fetch is already under way.
+func (m model) fetchPreview() tea.Cmd {
 	if len(m.matches) == 0 || m.previews == nil {
 		return nil
 	}
 	it := m.matches[m.cursor].item
-	if _, ok := m.previews[it.id]; ok || it.preview == nil {
+	if it.preview == nil || m.fetching[it.id] {
 		return nil
 	}
+	m.fetching[it.id] = true
 	return func() tea.Msg {
 		content, err := it.preview()
 		if err != nil {
@@ -121,17 +153,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
 		m.previews[msg.key] = msg.content
+		delete(m.fetching, msg.key)
+	case tickMsg:
+		return m, tea.Batch(m.fetchPreview(), tick())
+	case outputMsg:
+		m.outputs[msg.id].add(msg.chunk)
+		return m, waitOutput(m.outputCh)
+	case exitMsg:
+		out := m.outputs[msg.id]
+		out.running, out.err = false, msg.err
+		m.proc, m.outputCh = nil, nil
+		// A failure stays on screen so its output can be read.
+		if out.closeOnSuccess && msg.err == nil {
+			return m, tea.Quit
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.move(-1)
+		case tea.MouseWheelDown:
+			m.move(1)
+		}
+		return m, m.loadPreview()
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		// A click selects a row; a click on the selected row runs it like enter.
+		i, ok := m.rowAt(msg.X, msg.Y)
+		if !ok {
+			return m, nil
+		}
+		if i == m.cursor {
+			return m.activate()
+		}
+		m.cursor = i
+		return m, m.loadPreview()
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "enter":
-			if len(m.matches) > 0 {
-				m.chosen = &m.matches[m.cursor].item
-			}
-			return m, tea.Quit
+			return m.activate()
 		case "up", "ctrl+p":
 			m.move(-1)
 		case "down", "ctrl+n":
@@ -155,6 +220,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadPreview()
 	}
 	return m, nil
+}
+
+// Runs the selected item: a shell command runs inside the picker with its output in the preview,
+// anything else closes the picker and runs afterwards.
+func (m model) activate() (tea.Model, tea.Cmd) {
+	if len(m.matches) == 0 {
+		return m, tea.Quit
+	}
+	it := m.matches[m.cursor].item
+	if it.command == "" || it.run != nil {
+		m.chosen = &it
+		return m, tea.Quit
+	}
+	if m.proc != nil {
+		return m, nil // one command at a time
+	}
+	if m.record != nil {
+		m.record(it.id)
+	}
+	out := &commandOutput{running: true, closeOnSuccess: it.closeOnSuccess}
+	m.outputs[it.id] = out
+	proc, ch, err := startCommand(it)
+	if err != nil {
+		out.running, out.err = false, err
+		return m, nil
+	}
+	m.proc, m.outputCh = proc, ch
+	return m, waitOutput(ch)
+}
+
+// The list row at x, y on the screen, as an index into matches.
+func (m model) rowAt(x, y int) (int, bool) {
+	row := y - listTop
+	if x >= m.leftWidth() || row < 0 || row >= m.listHeight() {
+		return 0, false
+	}
+	i := m.listOffset() + row
+	return i, i < len(m.matches)
+}
+
+// The list starts below the prompt and its rule, and ends above the footer.
+const listTop = 2
+
+func (m model) listHeight() int { return max(m.height-listTop-1, 0) }
+
+// The first match shown, so that the cursor stays on screen.
+func (m model) listOffset() int { return max(m.cursor-m.listHeight()+1, 0) }
+
+// The list takes the whole width when it is too narrow for a preview.
+func (m model) leftWidth() int {
+	if m.width >= 60 {
+		return m.width / 2
+	}
+	return m.width
 }
 
 // The text a key types, or "" for keys held with ctrl, alt or super.
@@ -331,6 +450,7 @@ func (m *model) move(d int) {
 func (m model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -339,10 +459,7 @@ func (m model) render() string {
 		return ""
 	}
 	// No preview when too narrow.
-	leftWidth := m.width
-	if m.width >= 60 {
-		leftWidth = m.width / 2
-	}
+	leftWidth := m.leftWidth()
 	// Rows with a horizontal rule join the vertical divider with ┤.
 	var left []string
 	rules := map[int]bool{}
@@ -353,9 +470,8 @@ func (m model) render() string {
 	// Always show the prompt so the list does not shift; key hints and counts go at the bottom, dimmed.
 	left = append(left, " "+m.promptLine())
 	addRule()
-	resultsHeight := max(m.height-len(left)-1, 0)
-	results := m.resultLines(leftWidth-1, resultsHeight)
-	for i := range resultsHeight {
+	results := m.resultLines(leftWidth - 1)
+	for i := range m.listHeight() {
 		line := ""
 		if i < len(results) {
 			line = " " + results[i]
@@ -373,7 +489,12 @@ func (m model) render() string {
 		it := m.matches[m.cursor].item
 		right = append(right, " "+titleStyle.Bold(true).Render(it.title))
 		right = append(right, previewLines(it, rightWidth-2)...)
-		if content, ok := m.previews[it.id]; ok {
+		if out := m.outputs[it.id]; out != nil {
+			text, color := out.status()
+			right = append(right, " "+lipgloss.NewStyle().Foreground(color).Render(text))
+			right = append(right, dimStyle.Render(strings.Repeat("─", rightWidth)))
+			right = append(right, tail(out.lines(), m.height-len(right))...)
+		} else if content, ok := m.previews[it.id]; ok {
 			right = append(right, dimStyle.Render(strings.Repeat("─", rightWidth)))
 			right = append(right, screenLines(content, m.height-len(right))...)
 		}
@@ -421,7 +542,6 @@ func (m model) promptLine() string {
 
 // The bottom line: key hints, with the active filter and the count on the right.
 func (m model) footerLine(width int) string {
-	help := strings.Join(m.help(), "  ")
 	faint := lipgloss.NewStyle().Foreground(faint)
 	right := faint.Render(fmt.Sprintf("%d / %d", len(m.matches), len(m.items)))
 	switch m.narrow {
@@ -431,7 +551,12 @@ func (m model) footerLine(width int) string {
 	default:
 		right = lipgloss.NewStyle().Foreground(statusColor(m.narrow)).Render(statusDot(m.narrow)+" "+m.narrow) + "  " + right
 	}
-	return spread(faint.Render(help), right, width)
+	// The count always shows; key hints that do not fit are dropped from the end.
+	hints := m.help()
+	for len(hints) > 0 && lipgloss.Width(strings.Join(hints, "  "))+1+lipgloss.Width(right) > width {
+		hints = hints[:len(hints)-1]
+	}
+	return spread(faint.Render(strings.Join(hints, "  ")), right, width)
 }
 
 // Hints only the keys that work in the current state.
@@ -481,15 +606,10 @@ func (m model) queryWithCursor() string {
 		titleStyle.Render(after)
 }
 
-func (m *model) resultLines(width, height int) []string {
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+height {
-		m.offset = m.cursor - height + 1
-	}
+func (m model) resultLines(width int) []string {
+	offset, height := m.listOffset(), m.listHeight()
 	var lines []string
-	for i := m.offset; i < len(m.matches) && i < m.offset+height; i++ {
+	for i := offset; i < len(m.matches) && i < offset+height; i++ {
 		lines = append(lines, resultLine(m.matches[i], i == m.cursor, width))
 	}
 	return lines
@@ -582,7 +702,11 @@ func resultLine(mt match, selected bool, width int) string {
 
 // Drops trailing blank lines of the pane screen and keeps the bottom (where the prompt is) if it does not fit.
 func screenLines(content string, height int) []string {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	return tail(strings.Split(strings.TrimRight(content, "\n"), "\n"), height)
+}
+
+// Drops trailing blank lines and keeps the last height lines, indented by one space.
+func tail(lines []string, height int) []string {
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
@@ -592,10 +716,11 @@ func screenLines(content string, height int) []string {
 	if len(lines) > height {
 		lines = lines[len(lines)-height:]
 	}
+	out := make([]string, len(lines))
 	for i, l := range lines {
-		lines[i] = " " + l
+		out[i] = " " + l
 	}
-	return lines
+	return out
 }
 
 func previewLines(it item, width int) []string {

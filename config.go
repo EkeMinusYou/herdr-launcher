@@ -32,7 +32,9 @@ type commandConfig struct {
 	Description string `toml:"description"`
 	Command     string `toml:"command"`
 	Pane        string `toml:"pane"`
-	Plugin      string `toml:"plugin"` // the plugin that owns pane; defaults to this plugin
+	Plugin      string `toml:"plugin"`      // the plugin that owns pane; defaults to this plugin
+	Interactive bool   `toml:"interactive"` // run command in the terminal instead of showing its output in the preview
+	Close       bool   `toml:"close"`       // close the launcher when command succeeds
 }
 
 func configPath() string {
@@ -94,6 +96,12 @@ func commandItems(cfg config) ([]item, error) {
 		if c.Plugin != "" && c.Pane == "" {
 			return nil, fmt.Errorf("commands[%d]: plugin needs pane", i)
 		}
+		if c.Interactive && c.Command == "" {
+			return nil, fmt.Errorf("commands[%d]: interactive needs command", i)
+		}
+		if c.Close && (c.Command == "" || c.Interactive) {
+			return nil, fmt.Errorf("commands[%d]: close needs a command that is not interactive", i)
+		}
 		it := item{
 			id:      "command:" + c.Name,
 			kind:    "command",
@@ -109,8 +117,11 @@ func commandItems(cfg config) ([]item, error) {
 			it.desc += "\npane: " + plugin + " / " + c.Pane
 			it.run = func() error { return openPane(plugin, c.Pane) }
 		} else {
-			it.command = c.Command
-			it.run = func() error { return runCommand("sh", "-c", c.Command) }
+			// Shell commands run inside the picker (see run.go) unless they need the terminal.
+			it.command, it.closeOnSuccess = c.Command, c.Close
+			if c.Interactive {
+				it.run = func() error { return runInTerminal(c.Command) }
+			}
 		}
 		items = append(items, it)
 	}

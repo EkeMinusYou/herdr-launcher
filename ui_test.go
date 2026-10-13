@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +47,10 @@ func TestCommandItemsInvalid(t *testing.T) {
 		"name = \"both\"\ncommand = \"ls\"\npane = \"lazygit\"", // command and pane together
 		"name = \"neither\"", // no command or pane
 		"command = \"ls\"",   // no name
-		"name = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"", // plugin without pane
+		"name = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"",                // plugin without pane
+		"name = \"x\"\ninteractive = true\npane = \"lazygit\"",               // interactive without command
+		"name = \"x\"\nclose = true\npane = \"lazygit\"",                     // close without command
+		"name = \"x\"\nclose = true\ninteractive = true\ncommand = \"htop\"", // close with interactive
 	} {
 		path := t.TempDir() + "/config.toml"
 		os.WriteFile(path, []byte("[[commands]]\n"+body+"\n"), 0o644)
@@ -573,5 +578,152 @@ func TestLoadHistoryCorrupt(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "launcher.log")); !strings.Contains(string(b), "history.json") {
 		t.Errorf("log = %q, want the history error", b)
+	}
+}
+
+// Hints that do not fit are dropped, but the count always shows.
+func TestFooterKeepsCount(t *testing.T) {
+	m := model{items: gotoItems(), hasPanes: true, hasCommands: true}
+	m.filter()
+	for _, width := range []int{120, 40, 12} {
+		line := ansi.Strip(m.footerLine(width))
+		if !strings.HasSuffix(line, "5 / 5") || ansi.StringWidth(line) > width {
+			t.Errorf("width %d: %q, want it to end with the count and fit", width, line)
+		}
+	}
+}
+
+func TestMouse(t *testing.T) {
+	mm := model{items: gotoItems(), selectFirst: true, hasPanes: true}
+	mm.width, mm.height = 120, 20
+	mm.filter()
+	click := func(x, y int) tea.MouseClickMsg { return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft} }
+	var m tea.Model = mm
+	m, _ = m.Update(click(5, listTop+2))
+	if got := m.(model).cursor; got != 2 {
+		t.Errorf("click on the third row: cursor %d, want 2", got)
+	}
+	for _, c := range []tea.MouseClickMsg{click(90, listTop), click(5, listTop+10), click(5, 0)} {
+		if m2, _ := m.Update(c); m2.(model).cursor != 2 {
+			t.Errorf("click at %d,%d outside the rows moved the cursor", c.X, c.Y)
+		}
+	}
+	m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if got := m.(model).cursor; got != 3 {
+		t.Errorf("wheel down: cursor %d, want 3", got)
+	}
+	// A click on the selected row runs it like enter.
+	_, cmd := m.Update(click(5, listTop+3))
+	if cmd == nil || cmd() != tea.Quit() {
+		t.Error("click on the selected row should pick it")
+	}
+}
+
+// A shell command runs inside the picker and its output and exit status go to the preview.
+func TestRunCommand(t *testing.T) {
+	command := "echo hello; echo world >&2; exit 3"
+	if runtime.GOOS == "windows" {
+		command = "echo hello& echo world 1>&2& exit /b 3"
+	}
+	recorded := ""
+	mm := model{
+		items:   []item{{id: "command:x", kind: "command", title: "x", command: command, columns: []column{{"x", fg}}}},
+		outputs: map[string]*commandOutput{},
+		record:  func(id string) { recorded = id },
+		width:   120,
+		height:  20,
+	}
+	mm.filter()
+	var m tea.Model = mm
+	m, cmd := m.Update(key(tea.KeyEnter))
+	for cmd != nil {
+		msg := cmd()
+		if msg == tea.Quit() {
+			t.Fatal("enter on a shell command should keep the picker open")
+		}
+		m, cmd = m.Update(msg)
+	}
+	got := m.(model)
+	out := got.outputs["command:x"]
+	if out == nil || !strings.Contains(out.text, "hello") || !strings.Contains(out.text, "world") {
+		t.Fatalf("output = %+v, want stdout and stderr", out)
+	}
+	if status, _ := out.status(); status != "exit 3" || got.proc != nil {
+		t.Errorf("status %q, proc %v; want exit 3 and no process", status, got.proc)
+	}
+	if recorded != "command:x" {
+		t.Errorf("recorded %q, want the command", recorded)
+	}
+	if view := ansi.Strip(got.render()); !strings.Contains(view, "exit 3") || !strings.Contains(view, "hello") {
+		t.Errorf("preview does not show the output:\n%s", view)
+	}
+}
+
+func TestCommandOutputLines(t *testing.T) {
+	var o commandOutput
+	o.add("a\r\nprogress 10%\rprogress 100%\nb\n")
+	if got := strings.Join(o.lines(), "|"); got != "a|progress 100%|b" {
+		t.Errorf("lines = %q", got)
+	}
+}
+
+// Every tick reads the selected pane's screen again, and a fetch still under way is not repeated.
+func TestPreviewRefresh(t *testing.T) {
+	calls := 0
+	it := item{id: "p", columns: []column{{"p", fg}}, preview: func() (string, error) {
+		calls++
+		return fmt.Sprint("screen ", calls), nil
+	}}
+	mm := model{items: []item{it}, previews: map[string]string{}, fetching: map[string]bool{}}
+	mm.filter()
+	var m tea.Model = mm
+	for want := 1; want <= 2; want++ {
+		_, cmd := m.Update(tickMsg{})
+		batch, ok := cmd().(tea.BatchMsg) // the fetch and the next tick
+		if !ok || len(batch) != 2 {
+			t.Fatalf("tick %d: want a fetch and the next tick", want)
+		}
+		// A second tick before the fetch finishes only schedules the next tick.
+		if _, again := m.Update(tickMsg{}); again == nil {
+			t.Fatal("a tick should always schedule the next one")
+		} else if _, isBatch := again().(tea.BatchMsg); isBatch {
+			t.Errorf("tick %d: fetched again while a fetch was under way", want)
+		}
+		m, _ = m.Update(batch[0]())
+		if got := m.(model).previews["p"]; got != fmt.Sprint("screen ", want) {
+			t.Errorf("tick %d: preview %q", want, got)
+		}
+	}
+}
+
+// close = true closes the picker when the command succeeds, and keeps it open on a failure.
+func TestRunCommandClose(t *testing.T) {
+	succeed, fail := "exit 0", "echo oops; exit 1"
+	if runtime.GOOS == "windows" {
+		succeed, fail = "exit /b 0", "echo oops& exit /b 1"
+	}
+	for _, tt := range []struct {
+		command string
+		quit    bool
+	}{{succeed, true}, {fail, false}} {
+		mm := model{
+			items:   []item{{id: "command:x", kind: "command", command: tt.command, closeOnSuccess: true, columns: []column{{"x", fg}}}},
+			outputs: map[string]*commandOutput{},
+		}
+		mm.filter()
+		var m tea.Model = mm
+		m, cmd := m.Update(key(tea.KeyEnter))
+		quit := false
+		for cmd != nil {
+			msg := cmd()
+			if msg == tea.Quit() {
+				quit = true
+				break
+			}
+			m, cmd = m.Update(msg)
+		}
+		if quit != tt.quit {
+			t.Errorf("%q: quit = %v, want %v", tt.command, quit, tt.quit)
+		}
 	}
 }

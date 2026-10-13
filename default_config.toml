@@ -39,7 +39,11 @@ sort = "herdr"
 # Commands shown in the launcher.
 #   name        shown in the list and used for search
 #   description shown next to the name and in the preview
-#   command     run with `sh -c` in the directory of the pane you opened the launcher from
+#   command     run with `sh -c` (`cmd /c` on Windows) in the directory of the pane you opened the launcher from,
+#               with its output shown in the preview while the launcher stays open
+#   interactive with command, run it in the launcher's terminal instead (for commands like htop);
+#               the launcher closes when it exits
+#   close       with command, close the launcher when it succeeds; on failure it stays open to show the output
 #   pane        instead of command, open one of this plugin's [[panes]] by id
 #   plugin      with pane, open a pane of another plugin instead (its plugin id)
 
@@ -52,8 +56,10 @@ pane = "lazygit"
 name = "gh browse"
 description = "Open the repository in the browser"
 command = "gh browse"
+close = true
 
 [[commands]]
 name = "gh pr view --web"
 description = "Open the pull request for the current branch in the browser"
 command = "gh pr view --web"
+close = true

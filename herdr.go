@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +51,7 @@ func socketCall(method string, params, out any) error {
 	if err != nil {
 		return err
 	}
-	conn, err := net.Dial("unix", path)
+	conn, err := dialHerdr(path)
 	if err != nil {
 		return err
 	}
@@ -236,7 +235,10 @@ func paneName(p pane) string {
 	if p.Label != "" {
 		return p.Label
 	}
-	return p.Cwd[strings.LastIndex(p.Cwd, "/")+1:]
+	if p.Cwd == "" {
+		return ""
+	}
+	return filepath.Base(p.Cwd)
 }
 
 // pane.focus jumps straight to a pane by id, even in another workspace or tab.

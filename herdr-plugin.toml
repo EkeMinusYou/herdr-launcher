@@ -2,19 +2,24 @@
 # lazygit opens as a plugin pane because keys.command popups are always titled "popup".
 id = "ekeminusyou.launcher"
 name = "Launcher"
-version = "0.3.1"
+version = "0.4.0"
 min_herdr_version = "0.9.0"
 description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
-platforms = ["macos", "linux"]
+platforms = ["macos", "linux", "windows"]
 
-# herdr plugin install fetches the prebuilt bin/launcher for this version from GitHub Releases.
-# plugin link does not build, so run go build -o bin/launcher . once by hand after linking.
+# herdr plugin install fetches the prebuilt bin/launcher.exe for this version from GitHub Releases.
+# The .exe suffix is required on Windows and an ordinary file name elsewhere, so one command works everywhere.
+# plugin link does not build, so run go build -o bin/launcher.exe . once by hand after linking.
 [[build]]
 command = ["bash", "scripts/fetch-launcher.sh"]
 platforms = ["macos", "linux"]
 
+[[build]]
+command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/fetch-launcher.ps1"]
+platforms = ["windows"]
+
 # Bind keys to these actions. plugin pane open without --cwd starts in the plugin directory,
-# so bin/launcher resolves as a relative path. The launcher then moves to the cwd of the pane it was opened from.
+# and herdr resolves ./bin/launcher.exe against it. The launcher then moves to the cwd of the pane it was opened from.
 [[actions]]
 id = "open"
 title = "Open launcher"
@@ -29,14 +34,14 @@ command = ["herdr", "plugin", "pane", "open", "--plugin", "ekeminusyou.launcher"
 
 # Each pane uses the profile of the same name from $(herdr plugin config-dir ekeminusyou.launcher)/config.toml,
 # or another one picked with --env LAUNCHER_PROFILE=<name> (see default_config.toml). Colors and commands come from there too.
-# A bin/launcher built from source rebuilds itself when a source file is newer than the binary.
+# A launcher built from source rebuilds itself (except on Windows) when a source file is newer than the binary.
 [[panes]]
 id = "launcher"
 title = "launcher"
 placement = "popup"
 width = "70%"
 height = "70%"
-command = ["bin/launcher"]
+command = ["./bin/launcher.exe"]
 
 # A replacement for herdr's goto (prefix+g) that lists only panes.
 [[panes]]
@@ -45,7 +50,7 @@ title = "goto"
 placement = "popup"
 width = "70%"
 height = "70%"
-command = ["bin/launcher"]
+command = ["./bin/launcher.exe"]
 
 [[panes]]
 id = "lazygit"
