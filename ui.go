@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"image/color"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -32,8 +32,9 @@ type model struct {
 	chosen        *item
 	previews      map[string]string // pane screens fetched so far, by item id
 	fetching      map[string]bool   // pane screens being fetched, so a refresh does not pile up
+	ticking       bool              // the refresh timer runs only while the selected item has a pane screen
 	outputs       map[string]*commandOutput
-	proc          *exec.Cmd       // the command running inside the picker, if any
+	proc          *runningCommand // the command running inside the picker, if any
 	outputCh      <-chan tea.Msg  // its output and exit
 	record        func(id string) // records a pick for frecency
 
@@ -77,13 +78,14 @@ func pick(items []item, opts options, record func(id string)) (*item, error) {
 			}
 		}
 	}
+	m.ticking = m.hasPreview()
 	result, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return nil, err
 	}
 	final := result.(model)
 	if final.proc != nil {
-		stopCommand(final.proc) // closing the picker stops a command still running in it
+		final.proc.stop() // closing the picker stops a command still running in it
 	}
 	return final.chosen, nil
 }
@@ -117,7 +119,27 @@ func (m model) matchesFilter(it item) bool {
 	}
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.loadPreview(), tick()) }
+func (m model) Init() tea.Cmd {
+	if m.ticking {
+		return tea.Batch(m.loadPreview(), tick())
+	}
+	return m.loadPreview()
+}
+
+func (m model) hasPreview() bool {
+	return len(m.matches) > 0 && m.matches[m.cursor].item.preview != nil
+}
+
+// After the selection changes: loads its pane screen and starts the refresh timer if it was stopped.
+// It changes m, so call it before returning m.
+func (m *model) selectionChanged() tea.Cmd {
+	cmd := m.loadPreview()
+	if m.ticking || !m.hasPreview() {
+		return cmd
+	}
+	m.ticking = true
+	return tea.Batch(cmd, tick())
+}
 
 // Fetches the selected item's pane screen in the background unless it is cached.
 func (m model) loadPreview() tea.Cmd {
@@ -155,6 +177,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previews[msg.key] = msg.content
 		delete(m.fetching, msg.key)
 	case tickMsg:
+		// Nothing to refresh, such as a command row, stops the timer until a pane is selected again.
+		if !m.hasPreview() {
+			m.ticking = false
+			return m, nil
+		}
 		return m, tea.Batch(m.fetchPreview(), tick())
 	case outputMsg:
 		m.outputs[msg.id].add(msg.chunk)
@@ -176,7 +203,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseWheelDown:
 			m.move(1)
 		}
-		return m, m.loadPreview()
+		cmd := m.selectionChanged()
+		return m, cmd
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
@@ -190,7 +218,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 		m.cursor = i
-		return m, m.loadPreview()
+		cmd := m.selectionChanged()
+		return m, cmd
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -217,7 +246,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.navigate(msg)
 			}
 		}
-		return m, m.loadPreview()
+		cmd := m.selectionChanged()
+		return m, cmd
 	}
 	return m, nil
 }
@@ -551,10 +581,16 @@ func (m model) footerLine(width int) string {
 	default:
 		right = lipgloss.NewStyle().Foreground(statusColor(m.narrow)).Render(statusDot(m.narrow)+" "+m.narrow) + "  " + right
 	}
-	// The count always shows; key hints that do not fit are dropped from the end.
+	// The count always shows; key hints that do not fit are dropped, least important first.
 	hints := m.help()
 	for len(hints) > 0 && lipgloss.Width(strings.Join(hints, "  "))+1+lipgloss.Width(right) > width {
-		hints = hints[:len(hints)-1]
+		least := 0
+		for i, h := range hints {
+			if hintRank(h) < hintRank(hints[least]) {
+				least = i
+			}
+		}
+		hints = slices.Delete(hints, least, least+1)
 	}
 	return spread(faint.Render(strings.Join(hints, "  ")), right, width)
 }
@@ -584,6 +620,27 @@ func (m model) help() []string {
 		help = append(help, "←/→ workspace")
 	}
 	return append(help, enter, "q close")
+}
+
+// How much a key hint matters when the footer is too narrow for all of them; lower is dropped first.
+// enter and closing are what everyone needs, so they stay longest.
+func hintRank(h string) int {
+	switch {
+	case strings.HasSuffix(h, " workspace"):
+		return 0
+	case h == "a all":
+		return 1
+	case strings.HasSuffix(h, " filter"):
+		return 2
+	case strings.HasSuffix(h, " move"):
+		return 3
+	case h == "/ search":
+		return 4
+	case strings.HasPrefix(h, "esc "), h == "q close":
+		return 5
+	default: // enter
+		return 6
+	}
 }
 
 // Puts left at the left edge and right at the right edge, dropping right if it does not fit.
@@ -684,12 +741,19 @@ func resultLine(mt match, selected bool, width int) string {
 	offset := 0 // byte offset in label; match positions are byte offsets
 	for _, c := range mt.item.columns {
 		style := bg(lipgloss.NewStyle().Foreground(c.color))
-		for i, r := range c.text {
-			if matched[offset+i] {
-				b.WriteString(hit.Render(string(r)))
-			} else {
-				b.WriteString(style.Render(string(r)))
+		// Styling is the costly part of drawing, so style each run of matched or unmatched characters at once.
+		for start := 0; start < len(c.text); {
+			isHit, end := matched[offset+start], start
+			for end < len(c.text) && matched[offset+end] == isHit {
+				_, size := utf8.DecodeRuneInString(c.text[end:])
+				end += size
 			}
+			if isHit {
+				b.WriteString(hit.Render(c.text[start:end]))
+			} else {
+				b.WriteString(style.Render(c.text[start:end]))
+			}
+			start = end
 		}
 		offset += len(c.text)
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -26,6 +27,19 @@ type commandOutput struct {
 	closeOnSuccess bool
 }
 
+// A command running inside the picker.
+type runningCommand struct {
+	cmd    *exec.Cmd
+	exited atomic.Bool // set once it has been waited for, after which its process id may belong to someone else
+}
+
+// Stops the command and what it started, unless it has already exited.
+func (r *runningCommand) stop() {
+	if !r.exited.Load() {
+		stopCommand(r.cmd)
+	}
+}
+
 type outputMsg struct{ id, chunk string }
 
 type exitMsg struct {
@@ -35,7 +49,7 @@ type exitMsg struct {
 
 // Starts it.command with its output going to a channel, and returns the process and the command
 // that delivers the first message. Each outputMsg is followed by another wait on the channel.
-func startCommand(it item) (*exec.Cmd, <-chan tea.Msg, error) {
+func startCommand(it item) (*runningCommand, <-chan tea.Msg, error) {
 	cmd := shellCommand(it.command)
 	ownProcessGroup(cmd)
 	r, w, err := os.Pipe()
@@ -49,6 +63,7 @@ func startCommand(it item) (*exec.Cmd, <-chan tea.Msg, error) {
 		return nil, nil, err
 	}
 	w.Close() // the child holds its own copy; reading ends when it exits
+	run := &runningCommand{cmd: cmd}
 	ch := make(chan tea.Msg)
 	go func() {
 		buf := make([]byte, 4096)
@@ -65,10 +80,12 @@ func startCommand(it item) (*exec.Cmd, <-chan tea.Msg, error) {
 			}
 		}
 		r.Close()
-		ch <- exitMsg{it.id, cmd.Wait()}
+		err := cmd.Wait()
+		run.exited.Store(true)
+		ch <- exitMsg{it.id, err}
 		close(ch)
 	}()
-	return cmd, ch, nil
+	return run, ch, nil
 }
 
 func waitOutput(ch <-chan tea.Msg) tea.Cmd {

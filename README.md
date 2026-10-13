@@ -19,7 +19,7 @@ It ships two entry points:
 - Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status), readline/emacs editing in the prompt, and the mouse
 - Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, with their output shown in the preview, or panes such as a lazygit popup, including panes of other plugins
 - `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
-- Fast: it talks to herdr's socket directly and shows the first frame in about 30 ms
+- Fast: it talks to herdr's socket directly and shows the first frame in about 30–40 ms
 
 ## Requirements
 
@@ -42,7 +42,7 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.4.0
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.4.1
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary (except on Windows, where you rebuild it by hand).

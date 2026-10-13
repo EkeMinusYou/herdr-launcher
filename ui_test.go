@@ -634,16 +634,10 @@ func TestRunCommand(t *testing.T) {
 		height:  20,
 	}
 	mm.filter()
-	var m tea.Model = mm
-	m, cmd := m.Update(key(tea.KeyEnter))
-	for cmd != nil {
-		msg := cmd()
-		if msg == tea.Quit() {
-			t.Fatal("enter on a shell command should keep the picker open")
-		}
-		m, cmd = m.Update(msg)
+	got, quit := runSelected(mm)
+	if quit {
+		t.Fatal("enter on a shell command should keep the picker open")
 	}
-	got := m.(model)
 	out := got.outputs["command:x"]
 	if out == nil || !strings.Contains(out.text, "hello") || !strings.Contains(out.text, "world") {
 		t.Fatalf("output = %+v, want stdout and stderr", out)
@@ -667,33 +661,19 @@ func TestCommandOutputLines(t *testing.T) {
 	}
 }
 
-// Every tick reads the selected pane's screen again, and a fetch still under way is not repeated.
-func TestPreviewRefresh(t *testing.T) {
-	calls := 0
-	it := item{id: "p", columns: []column{{"p", fg}}, preview: func() (string, error) {
-		calls++
-		return fmt.Sprint("screen ", calls), nil
-	}}
-	mm := model{items: []item{it}, previews: map[string]string{}, fetching: map[string]bool{}}
-	mm.filter()
+// Presses enter and feeds the model the messages that follow until the command has finished,
+// reporting whether the picker quit.
+func runSelected(mm model) (model, bool) {
 	var m tea.Model = mm
-	for want := 1; want <= 2; want++ {
-		_, cmd := m.Update(tickMsg{})
-		batch, ok := cmd().(tea.BatchMsg) // the fetch and the next tick
-		if !ok || len(batch) != 2 {
-			t.Fatalf("tick %d: want a fetch and the next tick", want)
+	m, cmd := m.Update(key(tea.KeyEnter))
+	for cmd != nil {
+		msg := cmd()
+		if msg == tea.Quit() {
+			return m.(model), true
 		}
-		// A second tick before the fetch finishes only schedules the next tick.
-		if _, again := m.Update(tickMsg{}); again == nil {
-			t.Fatal("a tick should always schedule the next one")
-		} else if _, isBatch := again().(tea.BatchMsg); isBatch {
-			t.Errorf("tick %d: fetched again while a fetch was under way", want)
-		}
-		m, _ = m.Update(batch[0]())
-		if got := m.(model).previews["p"]; got != fmt.Sprint("screen ", want) {
-			t.Errorf("tick %d: preview %q", want, got)
-		}
+		m, cmd = m.Update(msg)
 	}
+	return m.(model), false
 }
 
 // close = true closes the picker when the command succeeds, and keeps it open on a failure.
@@ -711,19 +691,66 @@ func TestRunCommandClose(t *testing.T) {
 			outputs: map[string]*commandOutput{},
 		}
 		mm.filter()
-		var m tea.Model = mm
-		m, cmd := m.Update(key(tea.KeyEnter))
-		quit := false
-		for cmd != nil {
-			msg := cmd()
-			if msg == tea.Quit() {
-				quit = true
-				break
-			}
-			m, cmd = m.Update(msg)
-		}
-		if quit != tt.quit {
+		if _, quit := runSelected(mm); quit != tt.quit {
 			t.Errorf("%q: quit = %v, want %v", tt.command, quit, tt.quit)
 		}
+	}
+}
+
+// Every tick reads the selected pane's screen again, and a fetch still under way is not repeated.
+// The timer itself is never run, so the test does not wait for it.
+func TestPreviewRefresh(t *testing.T) {
+	calls := 0
+	pane := item{id: "p", columns: []column{{"p", fg}}, preview: func() (string, error) {
+		calls++
+		return fmt.Sprint("screen ", calls), nil
+	}}
+	mm := model{items: []item{pane}, previews: map[string]string{}, fetching: map[string]bool{}, ticking: true}
+	mm.filter()
+	var m tea.Model = mm
+	for want := 1; want <= 2; want++ {
+		m2, cmd := m.Update(tickMsg{})
+		batch, ok := cmd().(tea.BatchMsg) // the fetch and the next tick; running cmd only builds the batch
+		if !ok || len(batch) != 2 {
+			t.Fatalf("tick %d: want a fetch and the next tick", want)
+		}
+		if again := m2.(model).fetchPreview(); again != nil {
+			t.Errorf("tick %d: fetched again while a fetch was under way", want)
+		}
+		m, _ = m2.Update(batch[0]())
+		if got := m.(model).previews["p"]; got != fmt.Sprint("screen ", want) {
+			t.Errorf("tick %d: preview %q", want, got)
+		}
+	}
+}
+
+// The timer stops while the selected row has no pane screen, and starts again when one is selected.
+func TestPreviewRefreshStops(t *testing.T) {
+	command := item{id: "command:x", kind: "command", command: "true", columns: []column{{"x", fg}}}
+	pane := item{id: "p", columns: []column{{"p", fg}}, preview: func() (string, error) { return "", nil }}
+	mm := model{items: []item{command, pane}, previews: map[string]string{}, fetching: map[string]bool{}, ticking: true, selectFirst: true}
+	mm.filter()
+	var m tea.Model = mm
+	m, cmd := m.Update(tickMsg{})
+	if cmd != nil || m.(model).ticking {
+		t.Fatal("a tick on a command row should stop the timer")
+	}
+	m, cmd = m.Update(runes("j"))
+	if !m.(model).ticking || cmd == nil {
+		t.Error("selecting a pane should start the timer again")
+	}
+}
+
+// When the footer is narrow, the least important hints go first and enter stays longest.
+func TestFooterHintOrder(t *testing.T) {
+	m := model{items: gotoItems(), hasPanes: true, hasCommands: true}
+	m.filter()
+	for _, width := range []int{70, 45, 25} {
+		if line := ansi.Strip(m.footerLine(width)); !strings.Contains(line, "enter select") {
+			t.Errorf("width %d: %q dropped enter before less important hints", width, line)
+		}
+	}
+	if line := ansi.Strip(m.footerLine(45)); strings.Contains(line, "workspace") {
+		t.Errorf("width 45: %q should drop the workspace hint first", line)
 	}
 }
