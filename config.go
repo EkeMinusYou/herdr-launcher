@@ -32,7 +32,7 @@ type commandConfig struct {
 	Description string `toml:"description"`
 	Command     string `toml:"command"`
 	Pane        string `toml:"pane"`
-	Plugin      string `toml:"plugin"`      // the plugin that owns pane; defaults to this plugin
+	Plugin      string `toml:"plugin"`      // the plugin that owns pane
 	Interactive bool   `toml:"interactive"` // run command in the terminal instead of showing its output in the preview
 	Close       bool   `toml:"close"`       // close the launcher when command succeeds
 }
@@ -55,7 +55,7 @@ var defaults = func() config {
 }()
 
 // Reads the user's config.toml. Without one, or for the parts it leaves out, the defaults apply:
-// commands when it has no commands key, and each profile field it does not set (see resolveOptions).
+// the theme, and each profile field it does not set (see resolveOptions). Commands come only from config.toml.
 // Unknown keys are an error so that a typo does not silently do nothing.
 func loadConfig(path string) (config, error) {
 	if path == "" {
@@ -76,9 +76,6 @@ func loadConfig(path string) (config, error) {
 		}
 		return cfg, fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
 	}
-	if !md.IsDefined("commands") {
-		cfg.Commands = defaults.Commands
-	}
 	return cfg, nil
 }
 
@@ -93,8 +90,8 @@ func commandItems(cfg config) ([]item, error) {
 		if c.Name == "" || (c.Command == "") == (c.Pane == "") {
 			return nil, fmt.Errorf("commands[%d]: set name and exactly one of command or pane", i)
 		}
-		if c.Plugin != "" && c.Pane == "" {
-			return nil, fmt.Errorf("commands[%d]: plugin needs pane", i)
+		if (c.Plugin == "") != (c.Pane == "") {
+			return nil, fmt.Errorf("commands[%d]: set plugin and pane together", i)
 		}
 		if c.Interactive && c.Command == "" {
 			return nil, fmt.Errorf("commands[%d]: interactive needs command", i)
@@ -110,12 +107,8 @@ func commandItems(cfg config) ([]item, error) {
 			desc:    c.Description,
 		}
 		if c.Pane != "" {
-			plugin := c.Plugin
-			if plugin == "" {
-				plugin = pluginID()
-			}
-			it.desc += "\npane: " + plugin + " / " + c.Pane
-			it.run = func() error { return openPane(plugin, c.Pane) }
+			it.desc += "\npane: " + c.Plugin + " / " + c.Pane
+			it.run = func() error { return openPane(c.Plugin, c.Pane) }
 		} else {
 			// Shell commands run inside the picker (see run.go) unless they need the terminal.
 			it.command, it.closeOnSuccess = c.Command, c.Close

@@ -15,13 +15,26 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func testCommands(t *testing.T) []item {
+// The example commands that default_config.toml has commented out, uncommented and loaded,
+// which also checks that the examples are valid.
+func exampleConfig(t *testing.T) config {
 	t.Helper()
-	cfg, err := loadConfig("")
+	var b strings.Builder
+	for _, l := range strings.Split(defaultConfig[strings.Index(defaultConfig, "# [[commands]]"):], "\n") {
+		b.WriteString(strings.TrimPrefix(strings.TrimPrefix(l, "#"), " ") + "\n")
+	}
+	path := t.TempDir() + "/config.toml"
+	os.WriteFile(path, []byte(b.String()), 0o644)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := commandItems(cfg)
+	return cfg
+}
+
+func testCommands(t *testing.T) []item {
+	t.Helper()
+	items, err := commandItems(exampleConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +61,7 @@ func TestCommandItemsInvalid(t *testing.T) {
 		"name = \"neither\"", // no command or pane
 		"command = \"ls\"",   // no name
 		"name = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"",                // plugin without pane
+		"name = \"x\"\npane = \"lazygit\"",                                   // pane without plugin
 		"name = \"x\"\ninteractive = true\npane = \"lazygit\"",               // interactive without command
 		"name = \"x\"\nclose = true\npane = \"lazygit\"",                     // close without command
 		"name = \"x\"\nclose = true\ninteractive = true\ncommand = \"htop\"", // close with interactive
@@ -438,7 +452,7 @@ func TestPluginPaneCommand(t *testing.T) {
 
 func TestLoadConfig(t *testing.T) {
 	// No config.toml at all means the defaults.
-	if cfg, err := loadConfig(t.TempDir() + "/missing.toml"); err != nil || len(cfg.Commands) == 0 || cfg.Theme != "catppuccin" {
+	if cfg, err := loadConfig(t.TempDir() + "/missing.toml"); err != nil || len(cfg.Commands) != 0 || cfg.Theme != "catppuccin" {
 		t.Errorf("missing file should fall back to the default config, got %+v, %v", cfg, err)
 	}
 	path := t.TempDir() + "/config.toml"
@@ -447,12 +461,8 @@ func TestLoadConfig(t *testing.T) {
 		os.WriteFile(path, []byte(body), 0o644)
 		return loadConfig(path)
 	}
-	// A config.toml that only changes a profile keeps the default commands.
-	if cfg, err := load("[profiles.goto]\nsort = \"frecency\"\n"); err != nil || len(cfg.Commands) != len(defaults.Commands) {
-		t.Errorf("commands = %d, err = %v; want the %d default commands", len(cfg.Commands), err, len(defaults.Commands))
-	}
-	// commands = [] means no commands.
-	if cfg, err := load("commands = []\n"); err != nil || len(cfg.Commands) != 0 {
+	// There are no default commands, so a config.toml without commands lists none.
+	if cfg, err := load("[profiles.goto]\nsort = \"frecency\"\n"); err != nil || len(cfg.Commands) != 0 {
 		t.Errorf("commands = %d, err = %v; want none", len(cfg.Commands), err)
 	}
 	// Typos are reported instead of ignored.
@@ -535,18 +545,18 @@ func TestCollectSort(t *testing.T) {
 		}
 		return strings.Join(ts, ", ")
 	}
-	commands := []string{"commands"}
-	items, _ := collect(options{sources: commands, sort: "herdr"}, defaults, history{})
+	commands, cfg := []string{"commands"}, exampleConfig(t)
+	items, _ := collect(options{sources: commands, sort: "herdr"}, cfg, history{})
 	if got, want := titles(items), "lazygit, gh browse, gh pr view --web"; got != want {
 		t.Errorf("herdr: got %q, want the config order %q", got, want)
 	}
-	items, _ = collect(options{sources: commands, sort: "name"}, defaults, history{})
+	items, _ = collect(options{sources: commands, sort: "name"}, cfg, history{})
 	if got, want := titles(items), "gh browse, gh pr view --web, lazygit"; got != want {
 		t.Errorf("name: got %q, want %q", got, want)
 	}
 	// Picked items come first; the rest keep their order.
 	h := history{"command:gh pr view --web": {Rank: 3, Last: time.Now().Unix()}}
-	items, _ = collect(options{sources: commands, sort: "frecency"}, defaults, h)
+	items, _ = collect(options{sources: commands, sort: "frecency"}, cfg, h)
 	if got, want := titles(items), "gh pr view --web, lazygit, gh browse"; got != want {
 		t.Errorf("frecency: got %q, want %q", got, want)
 	}
@@ -752,5 +762,17 @@ func TestFooterHintOrder(t *testing.T) {
 	}
 	if line := ansi.Strip(m.footerLine(45)); strings.Contains(line, "workspace") {
 		t.Errorf("width 45: %q should drop the workspace hint first", line)
+	}
+}
+
+// The c filter is only offered when there are commands to show, since there are none by default.
+func TestNoCommandsHint(t *testing.T) {
+	opts := options{start: "select", sources: []string{"commands", "panes"}, cursor: "top", sort: "herdr"}
+	if got := strings.Join(newModel(gotoItems(), opts, nil).help(), "  "); strings.Contains(got, "/c") {
+		t.Errorf("without commands: %q offers c", got)
+	}
+	items := append(gotoItems(), item{id: "cmd", kind: "command", columns: []column{{"cmd", fg}}})
+	if got := strings.Join(newModel(items, opts, nil).help(), "  "); !strings.Contains(got, "b/w/i/d/c filter") {
+		t.Errorf("with commands: %q should offer c", got)
 	}
 }

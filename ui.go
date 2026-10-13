@@ -43,7 +43,7 @@ type model struct {
 	searching   bool
 	narrow      string // agent_status narrowed with b/w/i/d, or "commands" with c. Empty shows everything.
 
-	// What the profile's sources include. Keys that only make sense for a source are enabled and hinted only then.
+	// Whether commands and panes are listed. Keys that only make sense for one are enabled and hinted only then.
 	hasCommands bool
 	hasPanes    bool
 }
@@ -58,6 +58,18 @@ const refreshInterval = 500 * time.Millisecond
 func tick() tea.Cmd { return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return tickMsg{} }) }
 
 func pick(items []item, opts options, record func(id string)) (*item, error) {
+	result, err := tea.NewProgram(newModel(items, opts, record)).Run()
+	if err != nil {
+		return nil, err
+	}
+	final := result.(model)
+	if final.proc != nil {
+		final.proc.stop() // closing the picker stops a command still running in it
+	}
+	return final.chosen, nil
+}
+
+func newModel(items []item, opts options, record func(id string)) model {
 	selectFirst := opts.start == "select"
 	m := model{
 		items:       items,
@@ -67,7 +79,7 @@ func pick(items []item, opts options, record func(id string)) (*item, error) {
 		record:      record,
 		selectFirst: selectFirst,
 		searching:   !selectFirst,
-		hasCommands: slices.Contains(opts.sources, "commands"),
+		hasCommands: slices.ContainsFunc(items, func(it item) bool { return it.kind == "command" }),
 		hasPanes:    slices.Contains(opts.sources, "panes"),
 	}
 	m.filter()
@@ -79,15 +91,7 @@ func pick(items []item, opts options, record func(id string)) (*item, error) {
 		}
 	}
 	m.ticking = m.hasPreview()
-	result, err := tea.NewProgram(m).Run()
-	if err != nil {
-		return nil, err
-	}
-	final := result.(model)
-	if final.proc != nil {
-		final.proc.stop() // closing the picker stops a command still running in it
-	}
-	return final.chosen, nil
+	return m
 }
 
 func (m *model) filter() {

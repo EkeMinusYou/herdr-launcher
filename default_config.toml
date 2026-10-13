@@ -3,8 +3,8 @@
 # Copy this file to the plugin config directory to customize it:
 #   cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.toml"
 # It is read every time the launcher opens, so edits apply without a rebuild.
-# Anything config.toml leaves out keeps the default here: the commands when it has no commands
-# (write commands = [] for none), the theme, and each profile field. Unknown keys are errors.
+# Anything config.toml leaves out keeps the default here: the theme and each profile field.
+# There are no default commands; the ones below are examples. Unknown keys are errors.
 
 # Color theme: "catppuccin" (herdr's default theme) or "ansi" (your terminal's 16 colors).
 theme = "catppuccin"
@@ -36,7 +36,7 @@ sources = ["panes"]
 cursor = "current"
 sort = "herdr"
 
-# Commands shown in the launcher.
+# Commands shown in the launcher. None by default; uncomment or write your own.
 #   name        shown in the list and used for search
 #   description shown next to the name and in the preview
 #   command     run with `sh -c` (`cmd /c` on Windows) in the directory of the pane you opened the launcher from,
@@ -44,22 +44,22 @@ sort = "herdr"
 #   interactive with command, run it in the launcher's terminal instead (for commands like htop);
 #               the launcher closes when it exits
 #   close       with command, close the launcher when it succeeds; on failure it stays open to show the output
-#   pane        instead of command, open one of this plugin's [[panes]] by id
-#   plugin      with pane, open a pane of another plugin instead (its plugin id)
+#   plugin, pane  instead of command, open a plugin pane: the plugin id and the id of one of its [[panes]]
 
-[[commands]]
-name = "lazygit"
-description = "Open lazygit"
-pane = "lazygit"
-
-[[commands]]
-name = "gh browse"
-description = "Open the repository in the browser"
-command = "gh browse"
-close = true
-
-[[commands]]
-name = "gh pr view --web"
-description = "Open the pull request for the current branch in the browser"
-command = "gh pr view --web"
-close = true
+# [[commands]]
+# name = "lazygit"
+# description = "Open lazygit"
+# command = "lazygit"
+# interactive = true
+#
+# [[commands]]
+# name = "gh browse"
+# description = "Open the repository in the browser"
+# command = "gh browse"
+# close = true
+#
+# [[commands]]
+# name = "gh pr view --web"
+# description = "Open the pull request for the current branch in the browser"
+# command = "gh pr view --web"
+# close = true

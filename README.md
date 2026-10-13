@@ -17,7 +17,7 @@ It ships two entry points:
 - Live preview of the selected pane's screen (refreshed every 0.5 s), its cwd and git branch
 - fzf's matching algorithm and extended search syntax
 - Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status), readline/emacs editing in the prompt, and the mouse
-- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, with their output shown in the preview, or panes such as a lazygit popup, including panes of other plugins
+- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, with their output shown in the preview, or panes of other plugins
 - `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
 - Fast: it talks to herdr's socket directly and shows the first frame in about 30–40 ms
 
@@ -26,7 +26,6 @@ It ships two entry points:
 - herdr 0.9.0 or later
 - macOS, Linux or Windows
 - `curl` or `wget` on macOS and Linux, or PowerShell on Windows, to download the prebuilt binary (or Go 1.27 or later, to build it from source)
-- Optional: `lazygit` and `gh` for the default commands
 
 ## Install
 
@@ -42,7 +41,7 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.4.1
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.5.0
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary (except on Windows, where you rebuild it by hand).
@@ -74,16 +73,6 @@ key = "prefix+g"
 type = "plugin_action"
 command = "ekeminusyou.launcher.goto"
 description = "goto pane"
-```
-
-The lazygit popup can also be bound directly. Pass the current pane's directory so it opens there:
-
-```toml
-[[keys.command]]
-key = "prefix+ctrl+g"
-type = "shell"
-command = "herdr plugin pane open --plugin ekeminusyou.launcher --entrypoint lazygit --cwd \"${HERDR_ACTIVE_PANE_CWD:-$PWD}\" --focus"
-description = "run lazygit"
 ```
 
 ## Usage
@@ -123,7 +112,7 @@ Lowercase terms are case-insensitive; a term with an uppercase letter is case-se
 
 ## Configuration
 
-The launcher reads `config.toml` from the plugin config directory on every open, so edits apply right away. [default_config.toml](default_config.toml) holds the defaults and is also the reference for the format. Anything your `config.toml` leaves out keeps its default: the commands when it has no `commands` (write `commands = []` for none), the theme, and each profile field. Unknown keys are reported as errors, so a typo does not silently do nothing.
+The launcher reads `config.toml` from the plugin config directory on every open, so edits apply right away. [default_config.toml](default_config.toml) holds the defaults and is also the reference for the format. Anything your `config.toml` leaves out keeps its default: the theme and each profile field. There are no default commands; the ones in default_config.toml and below are examples. Unknown keys are reported as errors, so a typo does not silently do nothing.
 
 ```sh
 cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.toml"
@@ -148,18 +137,12 @@ close = true
 
 # A command that needs the terminal runs there instead, and the launcher closes when it exits
 [[commands]]
-name = "htop"
-description = "Show processes"
-command = "htop"
-interactive = true
-
-# Or one of this plugin's popup panes (lazygit)
-[[commands]]
 name = "lazygit"
 description = "Open lazygit"
-pane = "lazygit"
+command = "lazygit"
+interactive = true
 
-# Or a pane of another plugin
+# Or a pane of another plugin, by plugin id and pane id
 [[commands]]
 name = "neovim"
 description = "Open nvim"

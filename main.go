@@ -230,14 +230,6 @@ func chdirToFocusedPane() {
 	}
 }
 
-// The plugin id passed by herdr. The environment is inherited by processes started with afterClose.
-func pluginID() string {
-	if id := os.Getenv("HERDR_PLUGIN_ID"); id != "" {
-		return id
-	}
-	return "ekeminusyou.launcher"
-}
-
 // Runs an interactive command in the launcher's terminal after the picker has closed.
 func runInTerminal(command string) error {
 	cmd := shellCommand(command)
