@@ -1,6 +1,6 @@
 package main
 
-// Lists panes with the herdr CLI and focuses the chosen one with the socket API's pane.focus.
+// Talks to herdr over its socket API: lists panes and reads their screens, and focuses the chosen pane.
 
 import (
 	"bufio"
@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -39,32 +39,45 @@ type pane struct {
 	Focused     bool   `json:"focused"`
 }
 
-func herdrBin() string {
-	if bin := os.Getenv("HERDR_BIN_PATH"); bin != "" {
-		return bin
+// Sends one request to the herdr socket and decodes its result into out (skipped when out is nil).
+// Talking to the socket directly avoids starting a herdr CLI process per call.
+func socketCall(method string, params, out any) error {
+	path := os.Getenv("HERDR_SOCKET_PATH")
+	if path == "" {
+		return errors.New("HERDR_SOCKET_PATH is not set")
 	}
-	return "herdr"
-}
-
-func herdr(args ...string) error {
-	out, err := exec.Command(herdrBin(), args...).CombinedOutput()
+	// Build the request before connecting: if it arrives a moment after the connection opens,
+	// herdr only picks it up about 100ms later.
+	req, err := json.Marshal(map[string]any{"id": "launcher", "method": method, "params": params})
 	if err != nil {
-		return fmt.Errorf("herdr %s: %w\n%s", strings.Join(args, " "), err, out)
+		return err
 	}
-	return nil
-}
-
-// Decodes the result of a herdr JSON response into out.
-func herdrJSON(out any, args ...string) error {
-	b, err := exec.Command(herdrBin(), args...).Output()
+	conn, err := net.Dial("unix", path)
 	if err != nil {
-		return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), err)
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return err
 	}
 	var resp struct {
 		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	if err := json.Unmarshal(b, &resp); err != nil {
+	if err := json.Unmarshal(line, &resp); err != nil {
 		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("%s: %s", method, resp.Error.Message)
+	}
+	if out == nil {
+		return nil
 	}
 	return json.Unmarshal(resp.Result, out)
 }
@@ -84,9 +97,9 @@ func paneItems() []item {
 		}
 		wg sync.WaitGroup
 	)
-	wg.Go(func() { herdrJSON(&ws, "workspace", "list") })
-	wg.Go(func() { herdrJSON(&ts, "tab", "list") })
-	wg.Go(func() { herdrJSON(&ps, "pane", "list") })
+	wg.Go(func() { socketCall("workspace.list", map[string]any{}, &ws) })
+	wg.Go(func() { socketCall("tab.list", map[string]any{}, &ts) })
+	wg.Go(func() { socketCall("pane.list", map[string]any{}, &ps) })
 	wg.Wait()
 
 	wsLabel := map[string]string{}
@@ -147,30 +160,53 @@ func paneItems() []item {
 	return items
 }
 
-// Looks up the git branch of each pane's cwd in parallel. Empty outside a git repository.
+// Looks up the git branch of each pane's cwd. Empty outside a git repository.
 func gitBranches(panes []pane) map[string]string {
-	cwds := map[string]bool{}
+	branches := map[string]string{}
 	for _, p := range panes {
-		cwds[p.Cwd] = true
+		if _, ok := branches[p.Cwd]; !ok {
+			branches[p.Cwd] = gitBranch(p.Cwd)
+		}
 	}
-	var (
-		mu       sync.Mutex
-		wg       sync.WaitGroup
-		branches = map[string]string{}
-	)
-	for cwd := range cwds {
-		wg.Go(func() {
-			out, err := exec.Command("git", "-C", cwd, "branch", "--show-current").Output()
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			branches[cwd] = strings.TrimSpace(string(out))
-			mu.Unlock()
-		})
-	}
-	wg.Wait()
 	return branches
+}
+
+// Reads the current branch from HEAD instead of running git, which is much faster for many panes.
+// Like git branch --show-current, it is empty for a detached HEAD. Worktrees and submodules have a
+// .git file pointing at their git directory.
+func gitBranch(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		gitPath := filepath.Join(d, ".git")
+		if info, err := os.Stat(gitPath); err == nil {
+			gitDir := gitPath
+			if !info.IsDir() {
+				b, err := os.ReadFile(gitPath)
+				if err != nil {
+					return ""
+				}
+				target, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
+				if !ok {
+					return ""
+				}
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(d, target)
+				}
+				gitDir = target
+			}
+			head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+			if err != nil {
+				return ""
+			}
+			branch, ok := strings.CutPrefix(strings.TrimSpace(string(head)), "ref: refs/heads/")
+			if !ok {
+				return "" // detached HEAD
+			}
+			return branch
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // The pane that was focused when the launcher opened.
@@ -201,49 +237,23 @@ func paneName(p pane) string {
 }
 
 // pane.focus jumps straight to a pane by id, even in another workspace or tab.
-// The CLI does not expose it, so send it to the socket directly.
+// The CLI does not expose it, so it goes through the socket.
 func focusPane(paneID string) error {
-	path := os.Getenv("HERDR_SOCKET_PATH")
-	if path == "" {
-		return errors.New("HERDR_SOCKET_PATH is not set")
-	}
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	req, err := json.Marshal(map[string]any{"id": "launcher", "method": "pane.focus", "params": map[string]string{"pane_id": paneID}})
-	if err != nil {
-		return err
-	}
-	if _, err := conn.Write(append(req, '\n')); err != nil {
-		return err
-	}
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
-	if err != nil {
-		return err
-	}
-	var resp struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return err
-	}
-	if resp.Error != nil {
-		return fmt.Errorf("pane.focus %s: %s", paneID, resp.Error.Message)
-	}
-	return nil
+	return socketCall("pane.focus", map[string]string{"pane_id": paneID}, nil)
 }
 
 // Reads what the pane currently shows, with colors.
 func readPane(paneID string) (string, error) {
-	b, err := exec.Command(herdrBin(), "pane", "read", paneID, "--source", "visible", "--format", "ansi").Output()
-	if err != nil {
-		return "", fmt.Errorf("herdr pane read %s: %w", paneID, err)
+	var resp struct {
+		Read struct {
+			Text string `json:"text"`
+		} `json:"read"`
 	}
-	return strings.ReplaceAll(string(b), "\r", ""), nil
+	params := map[string]string{"pane_id": paneID, "source": "visible", "format": "ansi"}
+	if err := socketCall("pane.read", params, &resp); err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(resp.Read.Text, "\r", ""), nil
 }
 
 func shortenHome(path string) string {

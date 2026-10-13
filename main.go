@@ -251,7 +251,7 @@ func waitForClose() {
 		return
 	}
 	for range 60 {
-		if herdr("pane", "get", self) != nil {
+		if socketCall("pane.get", map[string]string{"pane_id": self}, nil) != nil {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -263,7 +263,8 @@ func openPaneAfterClose(entrypoint, cwd string) error {
 	var err error
 	// Only one popup can be open at a time, so retry for a while if it cannot open yet.
 	for range 20 {
-		if err = herdr("plugin", "pane", "open", "--plugin", pluginID(), "--entrypoint", entrypoint, "--cwd", cwd, "--focus"); err == nil {
+		params := map[string]any{"plugin_id": pluginID(), "entrypoint": entrypoint, "cwd": cwd, "focus": true}
+		if err = socketCall("plugin.pane.open", params, nil); err == nil {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
