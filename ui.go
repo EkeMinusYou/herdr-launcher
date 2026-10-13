@@ -535,7 +535,7 @@ func kindColor(kind string) color.Color {
 	case "codex":
 		return blue
 	case "command":
-		return green
+		return mauve
 	default:
 		return subtle
 	}
@@ -562,7 +562,7 @@ func resultLine(mt match, selected bool, width int) string {
 	var b strings.Builder
 	b.WriteString(caret)
 	if mt.item.status != "" {
-		b.WriteString(bg(lipgloss.NewStyle().Foreground(statusColor(mt.item.status))).Render(statusDot(mt.item.status)+" "))
+		b.WriteString(bg(lipgloss.NewStyle().Foreground(statusColor(mt.item.status))).Render(statusDot(mt.item.status) + " "))
 	} else {
 		b.WriteString(base.Render("  "))
 	}
@@ -617,7 +617,7 @@ func previewLines(it item, width int) []string {
 	if it.command != "" {
 		cwd, _ := os.Getwd()
 		lines = append(lines, "")
-		add(lipgloss.NewStyle().Foreground(green), "$ "+it.command)
+		add(lipgloss.NewStyle().Foreground(mauve), "$ "+it.command)
 		add(dimStyle, "in "+shortenHome(cwd))
 	}
 	return lines
