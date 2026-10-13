@@ -9,10 +9,11 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 type match struct {
@@ -44,9 +45,6 @@ type model struct {
 type previewMsg struct{ key, content string }
 
 func pick(items []item, opts options) (*item, error) {
-	// Keep #rrggbb colors from being rounded to 256 colors.
-	lipgloss.SetColorProfile(termenv.TrueColor)
-
 	selectFirst := opts.start == "select"
 	m := model{
 		items:       items,
@@ -64,7 +62,7 @@ func pick(items []item, opts options) (*item, error) {
 			}
 		}
 	}
-	result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	result, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return nil, err
 	}
@@ -126,20 +124,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previews[msg.key] = msg.content
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c":
 			return m, tea.Quit
-		case tea.KeyEnter:
+		case "enter":
 			if len(m.matches) > 0 {
 				m.chosen = &m.matches[m.cursor].item
 			}
 			return m, tea.Quit
-		case tea.KeyUp, tea.KeyCtrlP:
+		case "up", "ctrl+p":
 			m.move(-1)
-		case tea.KeyDown, tea.KeyCtrlN:
+		case "down", "ctrl+n":
 			m.move(1)
-		case tea.KeyEsc:
+		case "esc":
 			// With --start select, esc while searching goes back to j/k navigation.
 			if !m.selectFirst || !m.searching {
 				return m, tea.Quit
@@ -149,7 +147,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case m.searching:
 				m.editQuery(msg)
-			case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+			case typed(msg) == "q":
 				return m, tea.Quit
 			default:
 				m.navigate(msg)
@@ -160,20 +158,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// The text a key types, or "" for keys held with ctrl, alt or super.
+func typed(msg tea.KeyPressMsg) string {
+	if msg.Mod.Contains(tea.ModCtrl) || msg.Mod.Contains(tea.ModAlt) || msg.Mod.Contains(tea.ModSuper) {
+		return ""
+	}
+	return msg.Text
+}
+
 // Keys when not searching with --start select (the same as herdr's goto).
-func (m *model) navigate(msg tea.KeyMsg) {
-	switch {
-	case msg.Type == tea.KeyLeft && m.hasPanes:
-		m.jumpGroup(-1)
+func (m *model) navigate(msg tea.KeyPressMsg) {
+	switch msg.String() {
+	case "left":
+		if m.hasPanes {
+			m.jumpGroup(-1)
+		}
 		return
-	case msg.Type == tea.KeyRight && m.hasPanes:
-		m.jumpGroup(1)
-		return
-	case msg.Type != tea.KeyRunes:
+	case "right":
+		if m.hasPanes {
+			m.jumpGroup(1)
+		}
 		return
 	}
-	key := string(msg.Runes)
-	switch key {
+	switch key := typed(msg); key {
 	case "j":
 		m.move(1)
 	case "k":
@@ -182,7 +189,7 @@ func (m *model) navigate(msg tea.KeyMsg) {
 		m.searching = true
 		m.pos = len(m.query)
 	default:
-		if narrow, ok := m.narrowKeys()[key]; ok {
+		if narrow, ok := m.narrowKeys()[key]; ok && key != "" {
 			m.narrow = narrow
 			m.filter()
 		}
@@ -233,43 +240,44 @@ func (m *model) jumpGroup(d int) {
 	m.cursor = i
 }
 
-// The prompt is edited with readline/emacs keys.
-func (m *model) editQuery(msg tea.KeyMsg) {
+// The prompt is edited with readline/emacs keys. Depending on the terminal, ctrl+h arrives as
+// either ctrl+h or backspace, so both delete a character.
+func (m *model) editQuery(msg tea.KeyPressMsg) {
 	q, p := m.query, m.pos
-	switch {
-	case msg.Type == tea.KeyCtrlA || msg.Type == tea.KeyHome:
+	switch msg.String() {
+	case "ctrl+a", "home":
 		m.pos = 0
-	case msg.Type == tea.KeyCtrlE || msg.Type == tea.KeyEnd:
+	case "ctrl+e", "end":
 		m.pos = len(q)
-	case msg.Type == tea.KeyCtrlB || msg.Type == tea.KeyLeft:
+	case "ctrl+b", "left":
 		m.pos = max(p-1, 0)
-	case msg.Type == tea.KeyCtrlF || msg.Type == tea.KeyRight:
+	case "ctrl+f", "right":
 		m.pos = min(p+1, len(q))
-	case msg.Alt && msg.Type == tea.KeyRunes && string(msg.Runes) == "b":
+	case "alt+b":
 		m.pos = wordStart(q, p)
-	case msg.Alt && msg.Type == tea.KeyRunes && string(msg.Runes) == "f":
+	case "alt+f":
 		m.pos = wordEnd(q, p)
-	case msg.Alt && msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
+	case "alt+d":
 		m.setQuery(splice(q, p, wordEnd(q, p), nil), p)
-	case msg.Type == tea.KeyCtrlW || (msg.Alt && msg.Type == tea.KeyBackspace):
+	case "ctrl+w", "alt+backspace":
 		start := wordStart(q, p)
 		m.setQuery(splice(q, start, p, nil), start)
-	case msg.Type == tea.KeyCtrlH || msg.Type == tea.KeyBackspace:
+	case "ctrl+h", "backspace":
 		if p > 0 {
 			m.setQuery(splice(q, p-1, p, nil), p-1)
 		}
-	case msg.Type == tea.KeyCtrlD || msg.Type == tea.KeyDelete:
+	case "ctrl+d", "delete":
 		if p < len(q) {
 			m.setQuery(splice(q, p, p+1, nil), p)
 		}
-	case msg.Type == tea.KeyCtrlU:
+	case "ctrl+u":
 		m.setQuery(splice(q, 0, p, nil), 0)
-	case msg.Type == tea.KeyCtrlK:
+	case "ctrl+k":
 		m.setQuery(splice(q, p, len(q), nil), p)
-	case msg.Type == tea.KeySpace:
-		m.setQuery(splice(q, p, p, []rune{' '}), p+1)
-	case msg.Type == tea.KeyRunes && !msg.Alt:
-		m.setQuery(splice(q, p, p, msg.Runes), p+len(msg.Runes))
+	default:
+		if text := []rune(typed(msg)); len(text) > 0 {
+			m.setQuery(splice(q, p, p, text), p+len(text))
+		}
 	}
 }
 
@@ -321,7 +329,13 @@ func (m *model) move(d int) {
 //	──────────────────┤ desc
 //	 > result         │──────
 //	   result         │ screen
-func (m model) View() string {
+func (m model) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	return v
+}
+
+func (m model) render() string {
 	if m.width == 0 {
 		return ""
 	}
@@ -487,7 +501,7 @@ func (m *model) resultLines(width, height int) []string {
 }
 
 // Shows agent status as a colored dot, like herdr's status_indicators = "dots".
-func statusColor(status string) lipgloss.Color {
+func statusColor(status string) color.Color {
 	switch status {
 	case "working":
 		return yellow
@@ -501,7 +515,7 @@ func statusColor(status string) lipgloss.Color {
 }
 
 // Like herdr's sidebar, the kind column shows claude in orange (catppuccin peach) and codex in blue.
-func kindColor(kind string) lipgloss.Color {
+func kindColor(kind string) color.Color {
 	switch kind {
 	case "claude":
 		return orange

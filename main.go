@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -37,7 +37,7 @@ type item struct {
 // One column of a list row. text is padded to the column width so columns line up.
 type column struct {
 	text  string
-	color lipgloss.Color
+	color color.Color
 }
 
 func (it item) label() string {

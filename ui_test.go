@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -49,31 +50,35 @@ func TestLoadCommandsInvalid(t *testing.T) {
 	}
 }
 
-func runes(s string) tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
-func key(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
-func alt(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s), Alt: true}
+// typed text, as a terminal delivers a printable key (or a paste of several characters)
+func runes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
+}
+func key(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
+func ctrl(r rune) tea.KeyPressMsg   { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+func alt(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Mod: tea.ModAlt}
 }
 
 func TestEditQuery(t *testing.T) {
 	tests := []struct {
 		name  string
-		keys  []tea.KeyMsg
+		keys  []tea.KeyPressMsg
 		query string
 		pos   int
 	}{
-		{"type", []tea.KeyMsg{runes("gh"), key(tea.KeySpace), runes("pr")}, "gh pr", 5},
-		{"ctrl+h", []tea.KeyMsg{runes("gh"), key(tea.KeyCtrlH)}, "g", 1},
-		{"ctrl+a then insert", []tea.KeyMsg{runes("pr"), key(tea.KeyCtrlA), runes("gh ")}, "gh pr", 3},
-		{"ctrl+b ctrl+d", []tea.KeyMsg{runes("abc"), key(tea.KeyCtrlB), key(tea.KeyCtrlB), key(tea.KeyCtrlD)}, "ac", 1},
-		{"ctrl+f ctrl+e", []tea.KeyMsg{runes("abc"), key(tea.KeyCtrlA), key(tea.KeyCtrlF), key(tea.KeyCtrlE)}, "abc", 3},
-		{"ctrl+w", []tea.KeyMsg{runes("gh pr view"), key(tea.KeyCtrlW)}, "gh pr ", 6},
-		{"ctrl+w twice", []tea.KeyMsg{runes("gh pr view"), key(tea.KeyCtrlW), key(tea.KeyCtrlW)}, "gh ", 3},
-		{"ctrl+u", []tea.KeyMsg{runes("gh pr"), key(tea.KeyCtrlB), key(tea.KeyCtrlU)}, "r", 0},
-		{"ctrl+k", []tea.KeyMsg{runes("gh pr"), key(tea.KeyCtrlA), key(tea.KeyCtrlF), key(tea.KeyCtrlK)}, "g", 1},
-		{"alt+b alt+d", []tea.KeyMsg{runes("gh pr view"), alt("b"), alt("b"), alt("d")}, "gh  view", 3},
-		{"alt+f", []tea.KeyMsg{runes("gh pr"), key(tea.KeyCtrlA), alt("f")}, "gh pr", 2},
-		{"bounds", []tea.KeyMsg{key(tea.KeyCtrlH), key(tea.KeyCtrlD), key(tea.KeyCtrlB), key(tea.KeyCtrlF)}, "", 0},
+		{"type", []tea.KeyPressMsg{runes("gh"), runes(" "), runes("pr")}, "gh pr", 5},
+		{"ctrl+h", []tea.KeyPressMsg{runes("gh"), ctrl('h')}, "g", 1},
+		{"ctrl+a then insert", []tea.KeyPressMsg{runes("pr"), ctrl('a'), runes("gh ")}, "gh pr", 3},
+		{"ctrl+b ctrl+d", []tea.KeyPressMsg{runes("abc"), ctrl('b'), ctrl('b'), ctrl('d')}, "ac", 1},
+		{"ctrl+f ctrl+e", []tea.KeyPressMsg{runes("abc"), ctrl('a'), ctrl('f'), ctrl('e')}, "abc", 3},
+		{"ctrl+w", []tea.KeyPressMsg{runes("gh pr view"), ctrl('w')}, "gh pr ", 6},
+		{"ctrl+w twice", []tea.KeyPressMsg{runes("gh pr view"), ctrl('w'), ctrl('w')}, "gh ", 3},
+		{"ctrl+u", []tea.KeyPressMsg{runes("gh pr"), ctrl('b'), ctrl('u')}, "r", 0},
+		{"ctrl+k", []tea.KeyPressMsg{runes("gh pr"), ctrl('a'), ctrl('f'), ctrl('k')}, "g", 1},
+		{"alt+b alt+d", []tea.KeyPressMsg{runes("gh pr view"), alt("b"), alt("b"), alt("d")}, "gh  view", 3},
+		{"alt+f", []tea.KeyPressMsg{runes("gh pr"), ctrl('a'), alt("f")}, "gh pr", 2},
+		{"bounds", []tea.KeyPressMsg{ctrl('h'), ctrl('d'), ctrl('b'), ctrl('f')}, "", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,14 +97,14 @@ func TestEditQuery(t *testing.T) {
 func TestMoveSelection(t *testing.T) {
 	tests := []struct {
 		name   string
-		keys   []tea.KeyMsg
+		keys   []tea.KeyPressMsg
 		cursor int
 		quit   bool
 	}{
-		{"ctrl+n ctrl+p", []tea.KeyMsg{key(tea.KeyCtrlN), key(tea.KeyCtrlN), key(tea.KeyCtrlP)}, 1, false},
-		{"down up", []tea.KeyMsg{key(tea.KeyDown), key(tea.KeyDown), key(tea.KeyUp)}, 1, false},
-		{"bounds", []tea.KeyMsg{key(tea.KeyCtrlP)}, 0, false},
-		{"esc", []tea.KeyMsg{key(tea.KeyEsc)}, 0, true},
+		{"ctrl+n ctrl+p", []tea.KeyPressMsg{ctrl('n'), ctrl('n'), ctrl('p')}, 1, false},
+		{"down up", []tea.KeyPressMsg{key(tea.KeyDown), key(tea.KeyDown), key(tea.KeyUp)}, 1, false},
+		{"bounds", []tea.KeyPressMsg{ctrl('p')}, 0, false},
+		{"esc", []tea.KeyPressMsg{key(tea.KeyEsc)}, 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -145,27 +150,27 @@ func gotoItems() []item {
 func TestGoto(t *testing.T) {
 	tests := []struct {
 		name  string
-		keys  []tea.KeyMsg
+		keys  []tea.KeyPressMsg
 		query string
 		ids   string // items left after filtering
 		at    string // selected item
 		quit  bool
 	}{
-		{"j k", []tea.KeyMsg{runes("j"), runes("j"), runes("k")}, "", "a1 a2 b1 b2 c1", "a2", false},
-		{"right", []tea.KeyMsg{key(tea.KeyRight)}, "", "a1 a2 b1 b2 c1", "b1", false},
-		{"right right right", []tea.KeyMsg{key(tea.KeyRight), key(tea.KeyRight), key(tea.KeyRight)}, "", "a1 a2 b1 b2 c1", "c1", false},
-		{"left from middle", []tea.KeyMsg{runes("j"), runes("j"), runes("j"), key(tea.KeyLeft)}, "", "a1 a2 b1 b2 c1", "a1", false},
-		{"left at first", []tea.KeyMsg{runes("j"), key(tea.KeyLeft)}, "", "a1 a2 b1 b2 c1", "a2", false},
-		{"filter working", []tea.KeyMsg{runes("w")}, "", "a1 c1", "a1", false},
-		{"filter blocked then all", []tea.KeyMsg{runes("b"), runes("a")}, "", "a1 a2 b1 b2 c1", "a1", false},
+		{"j k", []tea.KeyPressMsg{runes("j"), runes("j"), runes("k")}, "", "a1 a2 b1 b2 c1", "a2", false},
+		{"right", []tea.KeyPressMsg{key(tea.KeyRight)}, "", "a1 a2 b1 b2 c1", "b1", false},
+		{"right right right", []tea.KeyPressMsg{key(tea.KeyRight), key(tea.KeyRight), key(tea.KeyRight)}, "", "a1 a2 b1 b2 c1", "c1", false},
+		{"left from middle", []tea.KeyPressMsg{runes("j"), runes("j"), runes("j"), key(tea.KeyLeft)}, "", "a1 a2 b1 b2 c1", "a1", false},
+		{"left at first", []tea.KeyPressMsg{runes("j"), key(tea.KeyLeft)}, "", "a1 a2 b1 b2 c1", "a2", false},
+		{"filter working", []tea.KeyPressMsg{runes("w")}, "", "a1 c1", "a1", false},
+		{"filter blocked then all", []tea.KeyPressMsg{runes("b"), runes("a")}, "", "a1 a2 b1 b2 c1", "a1", false},
 		// after /, j and w are typed into the search
-		{"search", []tea.KeyMsg{runes("/"), runes("b")}, "b", "b1 b2", "b1", false},
-		{"search then esc then j", []tea.KeyMsg{runes("/"), runes("b"), key(tea.KeyEsc), runes("j")}, "b", "b1 b2", "b2", false},
-		{"esc", []tea.KeyMsg{key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
-		{"q", []tea.KeyMsg{runes("q")}, "", "a1 a2 b1 b2 c1", "a1", true},
+		{"search", []tea.KeyPressMsg{runes("/"), runes("b")}, "b", "b1 b2", "b1", false},
+		{"search then esc then j", []tea.KeyPressMsg{runes("/"), runes("b"), key(tea.KeyEsc), runes("j")}, "b", "b1 b2", "b2", false},
+		{"esc", []tea.KeyPressMsg{key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
+		{"q", []tea.KeyPressMsg{runes("q")}, "", "a1 a2 b1 b2 c1", "a1", true},
 		// while searching, q is typed into the search instead of closing
-		{"search q", []tea.KeyMsg{runes("/"), runes("q")}, "q", "", "", false},
-		{"search esc esc", []tea.KeyMsg{runes("/"), key(tea.KeyEsc), key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
+		{"search q", []tea.KeyPressMsg{runes("/"), runes("q")}, "q", "", "", false},
+		{"search esc esc", []tea.KeyPressMsg{runes("/"), key(tea.KeyEsc), key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -348,7 +353,7 @@ func TestApplyTheme(t *testing.T) {
 	if err := applyTheme("ansi", palette{Accent: "#123456"}); err != nil {
 		t.Fatal(err)
 	}
-	if accent != "#123456" || red != "1" {
+	if accent != lipgloss.Color("#123456") || red != lipgloss.Color("1") {
 		t.Errorf("accent = %q, red = %q", accent, red)
 	}
 	if err := applyTheme("nope", palette{}); err == nil {

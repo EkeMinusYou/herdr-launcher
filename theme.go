@@ -4,10 +4,11 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Colors are #rrggbb or a terminal 16/256 color number such as "4". Empty means the terminal default.
@@ -43,8 +44,8 @@ var themes = map[string]palette{
 }
 
 var (
-	fg, subtle, dim, faint, selectionBg, cursorFg, accent, caretColor lipgloss.Color
-	green, yellow, red, orange, blue                                  lipgloss.Color
+	fg, subtle, dim, faint, selectionBg, cursorFg, accent, caretColor color.Color
+	green, yellow, red, orange, blue                                  color.Color
 
 	titleStyle, dimStyle lipgloss.Style
 )
