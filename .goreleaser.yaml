@@ -1,0 +1,22 @@
+version: 2
+
+builds:
+  - binary: launcher
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.releaseVersion={{ .Version }}
+
+# Plain binaries named like launcher_darwin_arm64, as scripts/fetch-launcher.sh expects.
+archives:
+  - formats: [binary]
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+
+changelog:
+  use: github-native

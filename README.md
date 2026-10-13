@@ -32,7 +32,7 @@ It ships two entry points:
 
 - herdr 0.9.0 or later
 - macOS or Linux
-- Go 1.27 or later, to build the plugin
+- `curl` or `wget`, to download the prebuilt binary (or Go 1.27 or later, to build it from source)
 - Optional: `lazygit`, `nvim` and `gh` for the default commands
 
 ## Install
@@ -41,7 +41,7 @@ It ships two entry points:
 herdr plugin install EkeMinusYou/herdr-launcher
 ```
 
-The install builds `bin/launcher` with Go.
+The install downloads the prebuilt `bin/launcher` for the plugin version from GitHub Releases and checks it against `SHA256SUMS`. To build it from source with Go instead, set `LAUNCHER_FROM_SOURCE=1` for the install.
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.
 
@@ -169,7 +169,7 @@ Panes are recorded by pane id, so a pane that is closed and opened again starts 
 - Jumping to a pane uses `pane.focus` from herdr's socket API. It is in herdr's API schema but not yet in its documentation or CLI, so it may change.
 - The preview shows the pane as it was when the launcher opened; it does not refresh.
 - herdr's popup border can break where wide characters (such as Japanese) of the pane behind it touch the border. This comes from herdr's rendering.
-- macOS and Linux only.
+- macOS and Linux only (arm64 and amd64).
 
 ## Development
 
@@ -177,6 +177,8 @@ Panes are recorded by pane id, so a pane that is closed and opened again starts 
 go test ./...
 go build -o bin/launcher .
 ```
+
+To release, bump `version` in [herdr-plugin.toml](herdr-plugin.toml) and push a matching tag (`v0.1.0`). GitHub Actions runs GoReleaser, which uploads the binaries and `SHA256SUMS`. Release binaries never rebuild themselves.
 
 ## License
 

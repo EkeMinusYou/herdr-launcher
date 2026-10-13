@@ -7,10 +7,10 @@ min_herdr_version = "0.9.0"
 description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
 platforms = ["macos", "linux"]
 
-# herdr plugin install builds bin/launcher with this (requires Go).
-# plugin link does not build, so run the same command once by hand after linking.
+# herdr plugin install fetches the prebuilt bin/launcher for this version from GitHub Releases.
+# plugin link does not build, so run go build -o bin/launcher . once by hand after linking.
 [[build]]
-command = ["go", "build", "-o", "bin/launcher", "."]
+command = ["bash", "scripts/fetch-launcher.sh"]
 platforms = ["macos", "linux"]
 
 # Bind keys to these actions. plugin pane open without --cwd starts in the plugin directory,
@@ -27,7 +27,7 @@ title = "Go to pane"
 contexts = ["workspace", "tab", "pane", "global"]
 command = ["herdr", "plugin", "pane", "open", "--plugin", "ekeminusyou.launcher", "--entrypoint", "goto", "--focus"]
 
-# Flags are documented in options.go. bin/launcher rebuilds itself when a source file is newer than the binary.
+# Flags are documented in options.go. A bin/launcher built from source rebuilds itself when a source file is newer than the binary.
 # Colors and commands come from $(herdr plugin config-dir ekeminusyou.launcher)/config.toml (see default_config.toml).
 [[panes]]
 id = "launcher"

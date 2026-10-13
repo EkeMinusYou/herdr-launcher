@@ -169,9 +169,15 @@ func collect(opts options, cfg config) ([]item, error) {
 	return alignLastColumn(items), nil
 }
 
+// Set with -ldflags "-X main.releaseVersion=..." for release builds, which are fetched prebuilt and never rebuild themselves.
+var releaseVersion string
+
 // plugin link does not build, so rebuild when a source file is newer than the binary and re-exec the new binary.
 // The very first binary still has to be built by hand with go build.
 func rebuildIfStale() error {
+	if releaseVersion != "" {
+		return nil
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
