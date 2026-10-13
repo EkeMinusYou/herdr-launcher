@@ -2,21 +2,14 @@
 
 A telescope-like picker for [herdr](https://herdr.dev): run your frequent commands and jump to any pane, with a preview of the pane's screen.
 
-```text
- >                                                    │ Fix login redirect
-──────────────────────────────────────────────────────┤ web › 1 › Fix login redirect (current)
-     command   lazygit                 Open lazygit   │ cwd: ~/src/github.com/you/web
-     command   gh browse               Open the repo… │ branch: main
- > ● claude    web                  1  Fix login red… │ ● working
-   ● codex     api                  1  Add N+1 index  │──────────────────────────────────
-     terminal  api                  1  api            │ (the pane's current screen)
- / search  b/w/i/d/c filter  a all  ←/→ workspace  enter select  q close           5 / 5 │
-```
+![The launcher listing commands and agent panes, with a preview of the selected pane](assets/launcher.png)
 
 It ships two entry points:
 
 - **launcher** — your commands and every pane in one list, ordered by how often and how recently you picked them (zoxide-style frecency).
 - **goto** — a replacement for herdr's built-in goto (`prefix+g`): only panes, in herdr's order, starting on the pane you are in.
+
+![goto listing only panes, with a blocked agent's prompt in the preview](assets/goto.png)
 
 ## Features
 
@@ -24,7 +17,7 @@ It ships two entry points:
 - Preview of the selected pane's current screen, its cwd and git branch
 - fzf's matching algorithm and extended search syntax
 - Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status) and readline/emacs editing in the prompt
-- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or popups such as lazygit and nvim
+- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or a lazygit popup
 - `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
 - Fast: it talks to herdr's socket directly and shows the first frame in about 30 ms
 
@@ -33,7 +26,7 @@ It ships two entry points:
 - herdr 0.9.0 or later
 - macOS or Linux
 - `curl` or `wget`, to download the prebuilt binary (or Go 1.27 or later, to build it from source)
-- Optional: `lazygit`, `nvim` and `gh` for the default commands
+- Optional: `lazygit` and `gh` for the default commands
 
 ## Install
 
@@ -74,7 +67,7 @@ command = "ekeminusyou.launcher.goto"
 description = "goto pane"
 ```
 
-The lazygit and nvim popups can also be bound directly. Pass the current pane's directory so they open there:
+The lazygit popup can also be bound directly. Pass the current pane's directory so it opens there:
 
 ```toml
 [[keys.command]]
@@ -138,11 +131,18 @@ name = "gh browse"
 description = "Open the repository in the browser"
 command = "gh browse"
 
-# Or one of this plugin's popup panes (lazygit, nvim)
+# Or one of this plugin's popup panes (lazygit)
 [[commands]]
 name = "lazygit"
 description = "Open lazygit"
 pane = "lazygit"
+
+# Or a pane of another plugin
+[[commands]]
+name = "neovim"
+description = "Open nvim"
+plugin = "neovim"
+pane = "nvim"
 ```
 
 ### Entry point flags
