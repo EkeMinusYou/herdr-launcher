@@ -430,7 +430,7 @@ func (m model) footerLine(width int) string {
 	case "commands":
 		right = lipgloss.NewStyle().Foreground(kindColor("command")).Render("commands") + "  " + right
 	default:
-		right = lipgloss.NewStyle().Foreground(statusColor(m.narrow)).Render("● "+m.narrow) + "  " + right
+		right = lipgloss.NewStyle().Foreground(statusColor(m.narrow)).Render(statusDot(m.narrow)+" "+m.narrow) + "  " + right
 	}
 	return spread(faint.Render(help), right, width)
 }
@@ -500,7 +500,18 @@ func (m *model) resultLines(width, height int) []string {
 	return lines
 }
 
-// Shows agent status as a colored dot, like herdr's status_indicators = "dots".
+// Shows agent status as a colored dot, like herdr's goto (status_indicators = "dots").
+func statusDot(status string) string {
+	switch status {
+	case "working", "blocked", "done":
+		return "●"
+	case "idle":
+		return "○"
+	default: // unknown
+		return "·"
+	}
+}
+
 func statusColor(status string) color.Color {
 	switch status {
 	case "working":
@@ -551,7 +562,7 @@ func resultLine(mt match, selected bool, width int) string {
 	var b strings.Builder
 	b.WriteString(caret)
 	if mt.item.status != "" {
-		b.WriteString(bg(lipgloss.NewStyle().Foreground(statusColor(mt.item.status))).Render("● "))
+		b.WriteString(bg(lipgloss.NewStyle().Foreground(statusColor(mt.item.status))).Render(statusDot(mt.item.status)+" "))
 	} else {
 		b.WriteString(base.Render("  "))
 	}
@@ -601,7 +612,7 @@ func previewLines(it item, width int) []string {
 	}
 	add(titleStyle, it.desc)
 	if it.status != "" {
-		lines = append(lines, " "+lipgloss.NewStyle().Foreground(statusColor(it.status)).Render("● "+it.status))
+		lines = append(lines, " "+lipgloss.NewStyle().Foreground(statusColor(it.status)).Render(statusDot(it.status)+" "+it.status))
 	}
 	if it.command != "" {
 		cwd, _ := os.Getwd()
