@@ -36,6 +36,15 @@ herdr plugin install EkeMinusYou/herdr-launcher
 
 The install downloads the prebuilt `bin/launcher` for the plugin version from GitHub Releases and checks it against `SHA256SUMS`. To build it from source with Go instead, set `LAUNCHER_FROM_SOURCE=1` for the install.
 
+To update, run the install again. It replaces the installed version and keeps your config. Add `--ref` with a [release](https://github.com/EkeMinusYou/herdr-launcher/releases) tag to pick a version.
+
+```sh
+# The latest version
+herdr plugin install EkeMinusYou/herdr-launcher
+# A specific version
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.2.2
+```
+
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.
 
 ```sh
