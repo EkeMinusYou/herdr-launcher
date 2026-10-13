@@ -102,7 +102,10 @@ func main() {
 		return
 	}
 
-	var chosen *item
+	var (
+		chosen *item
+		items  []item
+	)
 	opts, err := parseOptions(os.Args[1:])
 	if err == nil {
 		err = rebuildIfStale()
@@ -113,7 +116,6 @@ func main() {
 		if cfg, err = loadConfig(configPath()); err == nil {
 			err = applyTheme(cfg.Theme, cfg.Colors)
 		}
-		var items []item
 		if err == nil {
 			items, err = collect(opts, cfg)
 		}
@@ -126,7 +128,11 @@ func main() {
 	}
 	if err == nil {
 		if path := historyPath(); path != "" {
-			loadHistory(path).record(path, chosen.id, time.Now())
+			listed := map[string]bool{}
+			for _, it := range items {
+				listed[it.id] = true
+			}
+			loadHistory(path).record(path, chosen.id, time.Now(), listed, opts.sources)
 		}
 		err = chosen.run()
 	}

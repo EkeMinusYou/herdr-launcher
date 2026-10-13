@@ -234,22 +234,62 @@ func TestParseOptions(t *testing.T) {
 func TestHistory(t *testing.T) {
 	path := t.TempDir() + "/history.json"
 	now := time.Now()
+	panes := []string{"panes"}
 	h := loadHistory(path)
-	h.record(path, "old", now.Add(-100*24*time.Hour))
-	h.record(path, "a", now)
-	h.record(path, "b", now)
-	h.record(path, "b", now)
+	h.record(path, "a", now, nil, panes)
+	h.record(path, "b", now, nil, panes)
+	h.record(path, "b", now, nil, panes)
 	h = loadHistory(path)
-	if _, ok := h["old"]; ok {
-		t.Error("entries older than retention should be dropped")
+	if h["a"].Rank != 1 || h["b"].Rank != 2 {
+		t.Errorf("ranks a=%v b=%v, want 1 and 2", h["a"].Rank, h["b"].Rank)
 	}
 	if !(h.score("b", now) > h.score("a", now) && h.score("a", now) > h.score("none", now)) {
 		t.Errorf("scores b=%v a=%v none=%v", h.score("b", now), h.score("a", now), h.score("none", now))
 	}
-	// with equal counts, the more recent visit ranks higher
-	h2 := history{"recent": {1, now.Unix()}, "week": {1, now.Add(-3 * 24 * time.Hour).Unix()}}
-	if h2.score("recent", now) <= h2.score("week", now) {
-		t.Error("recent visit should score higher")
+	// zoxide's weights: 4 within an hour, 2 within a day, 0.5 within a week, 0.25 after that
+	for _, c := range []struct {
+		age  time.Duration
+		want float64
+	}{{30 * time.Minute, 4}, {5 * time.Hour, 2}, {3 * 24 * time.Hour, 0.5}, {30 * 24 * time.Hour, 0.25}} {
+		h := history{"x": {Rank: 1, Last: now.Add(-c.age).Unix()}}
+		if got := h.score("x", now); got != c.want {
+			t.Errorf("age %v: score %v, want %v", c.age, got, c.want)
+		}
+	}
+}
+
+func TestHistoryAging(t *testing.T) {
+	now := time.Now().Unix()
+	h := history{"big": {Rank: 9999, Last: now}, "small": {Rank: 1.05, Last: now}}
+	h["new"] = visit{Rank: 1, Last: now} // total 10001.05 > 10000
+	h.age()
+	// every rank is scaled so the total would be 90% of the limit, then ranks below 1 are dropped
+	factor := 0.9 * maxRankTotal / 10001.05
+	if got, want := h["big"].Rank, 9999*factor; got < want-0.001 || got > want+0.001 {
+		t.Errorf("big rank = %v, want %v", got, want)
+	}
+	for _, id := range []string{"small", "new"} {
+		if _, ok := h[id]; ok {
+			t.Errorf("%s fell below 1 and should be forgotten", id)
+		}
+	}
+}
+
+func TestHistoryForgetStale(t *testing.T) {
+	path := t.TempDir() + "/history.json"
+	now := time.Now()
+	old := now.Add(-100 * 24 * time.Hour).Unix()
+	h := history{
+		"w1:p1":        {Rank: 5, Last: old},        // closed pane, old: forgotten
+		"w1:p2":        {Rank: 5, Last: old},        // still listed: kept
+		"command:gone": {Rank: 5, Last: old},        // commands were not loaded: kept
+		"w1:p3":        {Rank: 5, Last: now.Unix()}, // closed but recent: kept
+	}
+	h.record(path, "w1:p2", now, map[string]bool{"w1:p2": true}, []string{"panes"})
+	for id, want := range map[string]bool{"w1:p1": false, "w1:p2": true, "command:gone": true, "w1:p3": true} {
+		if _, ok := h[id]; ok != want {
+			t.Errorf("%s kept = %v, want %v", id, ok, want)
+		}
 	}
 }
 
