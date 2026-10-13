@@ -355,3 +355,36 @@ func TestApplyTheme(t *testing.T) {
 		t.Error("want error for unknown theme")
 	}
 }
+
+func TestSearch(t *testing.T) {
+	mk := func(label string) item { return item{id: label, columns: []column{{label, fg}}} }
+	items := []item{mk("gh pr view --web"), mk("gh browse"), mk("lazygit"), mk("Hydra console"), mk("hydra login")}
+	tests := []struct {
+		query string
+		want  string // ids in order
+	}{
+		{"pr gh", "gh pr view --web"},          // terms match in any order
+		{"lzg", "lazygit"},                     // fuzzy
+		{"hydra", "hydra login Hydra console"}, // lowercase is case-insensitive; shorter first on a tie
+		{"Hydra", "Hydra console"},             // uppercase makes it case-sensitive
+		{"hydra !console", "hydra login"},      // ! excludes
+		{"'git", "lazygit"},                    // ' matches exactly
+		{"^gh", "gh browse gh pr view --web"},  // ^ matches the start
+		{"web$", "gh pr view --web"},           // $ matches the end
+		{"gh zzz", ""},                         // every term has to match
+	}
+	for _, tt := range tests {
+		var ids []string
+		for _, m := range search(items, tt.query) {
+			ids = append(ids, m.item.id)
+		}
+		if got := strings.Join(ids, " "); got != tt.want {
+			t.Errorf("%q: got %q, want %q", tt.query, got, tt.want)
+		}
+	}
+	// highlight offsets are byte offsets into the label, also for multibyte text
+	ms := search([]item{mk("日本 gh")}, "gh")
+	if len(ms) != 1 || len(ms[0].indexes) != 2 || ms[0].indexes[0] != len("日本 ") {
+		t.Errorf("multibyte highlight offsets = %v", ms)
+	}
+}

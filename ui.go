@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
-	"github.com/sahilm/fuzzy"
 )
 
 type match struct {
@@ -44,11 +43,6 @@ type model struct {
 
 type previewMsg struct{ key, content string }
 
-type searchTexts []item
-
-func (t searchTexts) String(i int) string { return t[i].searchText() }
-func (t searchTexts) Len() int            { return len(t) }
-
 func pick(items []item, opts options) (*item, error) {
 	// Keep #rrggbb colors from being rounded to 256 colors.
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -78,7 +72,7 @@ func pick(items []item, opts options) (*item, error) {
 }
 
 func (m *model) filter() {
-	var items searchTexts
+	var items []item
 	for _, it := range m.items {
 		if m.matchesFilter(it) {
 			items = append(items, it)
@@ -90,9 +84,7 @@ func (m *model) filter() {
 			m.matches = append(m.matches, match{item: it})
 		}
 	} else {
-		for _, f := range fuzzy.FindFrom(string(m.query), items) {
-			m.matches = append(m.matches, match{item: items[f.Index], indexes: f.MatchedIndexes})
-		}
+		m.matches = search(items, string(m.query))
 	}
 	m.cursor, m.offset = 0, 0
 }
@@ -547,7 +539,7 @@ func resultLine(mt match, selected bool, width int) string {
 	} else {
 		b.WriteString(base.Render("  "))
 	}
-	offset := 0 // byte offset in label; fuzzy match positions are byte offsets
+	offset := 0 // byte offset in label; match positions are byte offsets
 	for _, c := range mt.item.columns {
 		style := bg(lipgloss.NewStyle().Foreground(c.color))
 		for i, r := range c.text {
