@@ -30,6 +30,7 @@ type commandConfig struct {
 	Description string `toml:"description"`
 	Command     string `toml:"command"`
 	Pane        string `toml:"pane"`
+	Plugin      string `toml:"plugin"` // the plugin that owns pane; defaults to this plugin
 }
 
 func configPath() string {
@@ -67,6 +68,9 @@ func commandItems(cfg config) ([]item, error) {
 		if c.Name == "" || (c.Command == "") == (c.Pane == "") {
 			return nil, fmt.Errorf("commands[%d]: set name and exactly one of command or pane", i)
 		}
+		if c.Plugin != "" && c.Pane == "" {
+			return nil, fmt.Errorf("commands[%d]: plugin needs pane", i)
+		}
 		it := item{
 			id:      "command:" + c.Name,
 			kind:    "command",
@@ -75,8 +79,12 @@ func commandItems(cfg config) ([]item, error) {
 			desc:    c.Description,
 		}
 		if c.Pane != "" {
-			it.desc += "\npane: " + c.Pane
-			it.run = func() error { return openPane(c.Pane) }
+			plugin := c.Plugin
+			if plugin == "" {
+				plugin = pluginID()
+			}
+			it.desc += "\npane: " + plugin + " / " + c.Pane
+			it.run = func() error { return openPane(plugin, c.Pane) }
 		} else {
 			it.command = c.Command
 			it.run = func() error { return runCommand("sh", "-c", c.Command) }

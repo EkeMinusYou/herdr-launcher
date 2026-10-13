@@ -393,3 +393,21 @@ func TestSearch(t *testing.T) {
 		t.Errorf("multibyte highlight offsets = %v", ms)
 	}
 }
+
+func TestPluginPaneCommand(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	os.WriteFile(path, []byte("[[commands]]\nname = \"neovim\"\nplugin = \"neovim\"\npane = \"nvim\"\n"), 0o644)
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := commandItems(cfg)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].desc, "pane: neovim / nvim") {
+		t.Errorf("items = %+v, err = %v", items, err)
+	}
+	os.WriteFile(path, []byte("[[commands]]\nname = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"\n"), 0o644)
+	cfg, _ = loadConfig(path)
+	if _, err := commandItems(cfg); err == nil {
+		t.Error("plugin without pane should be an error")
+	}
+}

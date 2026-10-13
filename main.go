@@ -88,8 +88,8 @@ func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ",
 
 func main() {
 	// Started by afterClose once the launcher has closed.
-	if len(os.Args) == 4 && os.Args[1] == "open-pane" {
-		if err := openPaneAfterClose(os.Args[2], os.Args[3]); err != nil {
+	if len(os.Args) == 5 && os.Args[1] == "open-pane" {
+		if err := openPaneAfterClose(os.Args[2], os.Args[3], os.Args[4]); err != nil {
 			os.Exit(1)
 		}
 		return
@@ -248,12 +248,12 @@ func afterClose(args ...string) error {
 	return cmd.Start()
 }
 
-func openPane(entrypoint string) error {
+func openPane(plugin, entrypoint string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	return afterClose("open-pane", entrypoint, cwd)
+	return afterClose("open-pane", plugin, entrypoint, cwd)
 }
 
 // As an overlay, HERDR_PANE_ID is the launcher's own pane; wait for it to go away (it is empty for popups).
@@ -270,12 +270,12 @@ func waitForClose() {
 	}
 }
 
-func openPaneAfterClose(entrypoint, cwd string) error {
+func openPaneAfterClose(plugin, entrypoint, cwd string) error {
 	waitForClose()
 	var err error
 	// Only one popup can be open at a time, so retry for a while if it cannot open yet.
 	for range 20 {
-		params := map[string]any{"plugin_id": pluginID(), "entrypoint": entrypoint, "cwd": cwd, "focus": true}
+		params := map[string]any{"plugin_id": plugin, "entrypoint": entrypoint, "cwd": cwd, "focus": true}
 		if err = socketCall("plugin.pane.open", params, nil); err == nil {
 			return nil
 		}

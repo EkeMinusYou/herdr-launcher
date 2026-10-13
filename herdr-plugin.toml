@@ -1,5 +1,5 @@
 # A telescope-like picker for running frequent commands and jumping to panes.
-# lazygit and nvim open as plugin panes because keys.command popups are always titled "popup".
+# lazygit opens as a plugin pane because keys.command popups are always titled "popup".
 id = "ekeminusyou.launcher"
 name = "Launcher"
 version = "0.1.0"
@@ -53,11 +53,3 @@ placement = "popup"
 width = "100%"
 height = "100%"
 command = ["lazygit"]
-
-[[panes]]
-id = "nvim"
-title = "neovim"
-placement = "popup"
-width = "100%"
-height = "100%"
-command = ["nvim"]

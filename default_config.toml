@@ -17,17 +17,13 @@ theme = "catppuccin"
 #   name        shown in the list and used for search
 #   description shown next to the name and in the preview
 #   command     run with `sh -c` in the directory of the pane you opened the launcher from
-#   pane        instead of command, open one of this plugin's [[panes]] by id in a popup
+#   pane        instead of command, open one of this plugin's [[panes]] by id
+#   plugin      with pane, open a pane of another plugin instead (its plugin id)
 
 [[commands]]
 name = "lazygit"
 description = "Open lazygit"
 pane = "lazygit"
-
-[[commands]]
-name = "neovim"
-description = "Open nvim"
-pane = "nvim"
 
 [[commands]]
 name = "gh browse"
