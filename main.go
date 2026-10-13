@@ -1,5 +1,5 @@
 // launcher picks a command or a pane to jump to in a herdr popup and runs it in the cwd of the pane it was opened from.
-// Command-line flags decide what is listed and how it is picked (options.go).
+// A profile in config.toml decides what is listed and how it is picked (options.go).
 package main
 
 import (
@@ -106,15 +106,16 @@ func main() {
 		chosen *item
 		items  []item
 	)
-	opts, err := parseOptions(os.Args[1:])
-	if err == nil {
-		err = rebuildIfStale()
-	}
+	var opts options
+	err := rebuildIfStale()
 	if err == nil {
 		chdirToFocusedPane()
 		var cfg config
 		if cfg, err = loadConfig(configPath()); err == nil {
 			err = applyTheme(cfg.Theme, cfg.Colors)
+		}
+		if err == nil {
+			opts, err = resolveOptions(profileName(), cfg)
 		}
 		if err == nil {
 			items, err = collect(opts, cfg)

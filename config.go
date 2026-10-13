@@ -1,6 +1,6 @@
 package main
 
-// Config file (colors and launcher commands). Reads config.toml in HERDR_PLUGIN_CONFIG_DIR
+// Config file (colors, launcher commands and profiles). Reads config.toml in HERDR_PLUGIN_CONFIG_DIR
 // and falls back to the embedded default_config.toml. User-editable settings do not live in
 // the plugin directory because reinstalling the plugin replaces it.
 
@@ -20,9 +20,10 @@ import (
 var defaultConfig string
 
 type config struct {
-	Theme    string          `toml:"theme"`
-	Colors   palette         `toml:"colors"`
-	Commands []commandConfig `toml:"commands"`
+	Theme    string                   `toml:"theme"`
+	Colors   palette                  `toml:"colors"`
+	Commands []commandConfig          `toml:"commands"`
+	Profiles map[string]profileConfig `toml:"profiles"`
 }
 
 type commandConfig struct {

@@ -221,17 +221,44 @@ func TestAlignLastColumn(t *testing.T) {
 	}
 }
 
-func TestParseOptions(t *testing.T) {
-	opts, err := parseOptions([]string{"--start", "select", "--sources", "panes", "--cursor", "current"})
+func TestResolveOptions(t *testing.T) {
+	defaults, err := loadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, err := resolveOptions("goto", defaults)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.start != "select" || strings.Join(opts.sources, ",") != "panes" || opts.cursor != "current" || opts.sort != "herdr" {
-		t.Errorf("got %+v", opts)
+		t.Errorf("goto: got %+v", opts)
 	}
-	for _, args := range [][]string{{"--start", "x"}, {"--sources", "commands,x"}, {"--cursor", "x"}, {"--sort", "x"}} {
-		if _, err := parseOptions(args); err == nil {
-			t.Errorf("%v: want error", args)
+
+	// A user's profile only changes the fields it sets, and new profiles can be added.
+	path := t.TempDir() + "/config.toml"
+	os.WriteFile(path, []byte("[profiles.goto]\nsort = \"frecency\"\n\n[profiles.agents]\nsources = [\"panes\"]\nstart = \"search\"\n"), 0o644)
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts, _ := resolveOptions("goto", cfg); opts.sort != "frecency" || opts.cursor != "current" || strings.Join(opts.sources, ",") != "panes" {
+		t.Errorf("goto with override: got %+v", opts)
+	}
+	if opts, _ := resolveOptions("launcher", cfg); opts.sort != "frecency" || strings.Join(opts.sources, ",") != "commands,panes" {
+		t.Errorf("launcher missing from config.toml should use the default: got %+v", opts)
+	}
+	if opts, err := resolveOptions("agents", cfg); err != nil || opts.start != "search" || opts.cursor != "top" || opts.sort != "herdr" {
+		t.Errorf("agents: got %+v, %v", opts, err)
+	}
+	if _, err := resolveOptions("missing", cfg); err == nil || !strings.Contains(err.Error(), "agents") {
+		t.Errorf("unknown profile: err = %v, want an error listing the defined profiles", err)
+	}
+
+	for _, body := range []string{"start = \"x\"", "sources = [\"commands\", \"x\"]", "cursor = \"x\"", "sort = \"x\""} {
+		os.WriteFile(path, []byte("[profiles.goto]\n"+body+"\n"), 0o644)
+		cfg, _ := loadConfig(path)
+		if _, err := resolveOptions("goto", cfg); err == nil {
+			t.Errorf("%s: want error", body)
 		}
 	}
 }

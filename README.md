@@ -79,7 +79,7 @@ description = "run lazygit"
 
 ## Usage
 
-Both entry points start in select mode.
+By default, both entry points start in select mode.
 
 | Key | Action |
 | --- | --- |
@@ -145,18 +145,43 @@ plugin = "neovim"
 pane = "nvim"
 ```
 
-### Entry point flags
+### Profiles
 
-Each entry point in [herdr-plugin.toml](herdr-plugin.toml) runs `bin/launcher` with different flags. Change them there to build your own variants.
+A profile decides what the picker lists and how it starts. The launcher and goto panes use the profile of the same name, defined in [default_config.toml](default_config.toml):
 
-| Flag | Values | launcher | goto |
+| Field | Values | launcher | goto |
 | --- | --- | --- | --- |
-| `--start` | `search`, `select` | `select` | `select` |
-| `--sources` | comma-separated `commands`, `panes` | `commands,panes` | `panes` |
-| `--cursor` | `top`, `current` (the pane you are in) | `top` | `current` |
-| `--sort` | `herdr`, `name`, `frecency` | `frecency` | `herdr` |
+| `start` | `search`, `select` | `select` | `select` |
+| `sources` | `commands`, `panes` | `["commands", "panes"]` | `["panes"]` |
+| `cursor` | `top`, `current` (the pane you are in) | `top` | `current` |
+| `sort` | `herdr`, `name`, `frecency` | `frecency` | `herdr` |
 
-`--sort` applies when the query is empty; a search is always ordered by match score.
+`sort` applies when the query is empty; a search is always ordered by match score.
+
+Change a profile in your `config.toml`. Only the fields you set change; the rest keep their defaults, and profiles you leave out keep working as they are:
+
+```toml
+[profiles.goto]
+sort = "frecency"
+```
+
+You can also add your own profiles. herdr cannot pass arguments to a plugin pane, so pick the profile with an environment variable when you open it:
+
+```toml
+# config.toml of the plugin
+[profiles.agents]
+sources = ["panes"]
+start = "search"
+```
+
+```toml
+# herdr's config.toml
+[[keys.command]]
+key = "prefix+a"
+type = "shell"
+command = "herdr plugin pane open --plugin ekeminusyou.launcher --entrypoint launcher --env LAUNCHER_PROFILE=agents --focus"
+description = "search agents"
+```
 
 ### Frecency
 
