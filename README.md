@@ -1,0 +1,183 @@
+# herdr-launcher
+
+A telescope-like picker for [herdr](https://herdr.dev): run your frequent commands and jump to any pane, with a preview of the pane's screen.
+
+```text
+ >                                                    │ Fix login redirect
+──────────────────────────────────────────────────────┤ web › 1 › Fix login redirect (current)
+     command   lazygit                 Open lazygit   │ cwd: ~/src/github.com/you/web
+     command   gh browse               Open the repo… │ branch: main
+ > ● claude    web                  1  Fix login red… │ ● working
+   ● codex     api                  1  Add N+1 index  │──────────────────────────────────
+     terminal  api                  1  api            │ (the pane's current screen)
+ / search  b/w/i/d/c filter  a all  ←/→ workspace  enter select  q close           5 / 5 │
+```
+
+It ships two entry points:
+
+- **launcher** — your commands and every pane in one list, ordered by how often and how recently you picked them (zoxide-style frecency).
+- **goto** — a replacement for herdr's built-in goto (`prefix+g`): only panes, in herdr's order, starting on the pane you are in.
+
+## Features
+
+- Every agent and terminal pane on its own row, with aligned workspace / tab / name columns, agent kind (`claude`, `codex`, `terminal`, …) and status dots (working, blocked, idle, done)
+- Preview of the selected pane's current screen, its cwd and git branch
+- fzf's matching algorithm and extended search syntax
+- Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status) and readline/emacs editing in the prompt
+- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or popups such as lazygit and nvim
+- `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
+- Fast: it talks to herdr's socket directly and shows the first frame in about 30 ms
+
+## Requirements
+
+- herdr 0.9.0 or later
+- macOS or Linux
+- Go 1.27 or later, to build the plugin
+- Optional: `lazygit`, `nvim` and `gh` for the default commands
+
+## Install
+
+```sh
+herdr plugin install EkeMinusYou/herdr-launcher
+```
+
+The install builds `bin/launcher` with Go.
+
+To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.
+
+```sh
+git clone https://github.com/EkeMinusYou/herdr-launcher
+cd herdr-launcher
+go build -o bin/launcher .
+herdr plugin link "$PWD"
+```
+
+## Key bindings
+
+Bind the plugin's actions in herdr's `config.toml`:
+
+```toml
+[keys]
+# Free prefix+g from herdr's built-in goto
+goto = ""
+
+[[keys.command]]
+key = "prefix+space"
+type = "plugin_action"
+command = "ekeminusyou.launcher.open"
+description = "open launcher"
+
+[[keys.command]]
+key = "prefix+g"
+type = "plugin_action"
+command = "ekeminusyou.launcher.goto"
+description = "goto pane"
+```
+
+The lazygit and nvim popups can also be bound directly. Pass the current pane's directory so they open there:
+
+```toml
+[[keys.command]]
+key = "prefix+ctrl+g"
+type = "shell"
+command = "herdr plugin pane open --plugin ekeminusyou.launcher --entrypoint lazygit --cwd \"${HERDR_ACTIVE_PANE_CWD:-$PWD}\" --focus"
+description = "run lazygit"
+```
+
+## Usage
+
+Both entry points start in select mode.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, `↓` / `↑`, `ctrl-n` / `ctrl-p` | Move the selection |
+| `←` / `→` | Jump to the first pane of the previous / next workspace |
+| `b` / `w` / `i` / `d` | Show only blocked / working / idle / done agents |
+| `c` | Show only commands (when commands and panes are both listed) |
+| `a` | Show everything again |
+| `/` | Start searching |
+| `enter` | Run the command or jump to the pane |
+| `q`, `esc` | Close |
+
+While searching, the prompt is edited with readline keys: `ctrl-a` / `ctrl-e`, `ctrl-b` / `ctrl-f`, `alt-b` / `alt-f`, `ctrl-h`, `ctrl-d`, `ctrl-w`, `alt-d`, `ctrl-u`, `ctrl-k`. `esc` leaves the search and keeps the filtered list.
+
+### Search syntax
+
+The search uses fzf's algorithm and its extended syntax. It looks at the row text plus the pane's git branch and path.
+
+| Query | Matches |
+| --- | --- |
+| `pr gh` | Items containing every term, in any order |
+| `lzg` | Fuzzy match |
+| `'git` | Exact match |
+| `^gh` | Starts with `gh` |
+| `web$` | Ends with `web` |
+| `hydra !console` | `hydra` but not `console` |
+
+Lowercase terms are case-insensitive; a term with an uppercase letter is case-sensitive.
+
+## Configuration
+
+The launcher reads `config.toml` from the plugin config directory on every open, so edits apply right away. Without one it uses [default_config.toml](default_config.toml), which is also the reference for the format.
+
+```sh
+cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.toml"
+```
+
+```toml
+# "catppuccin" (herdr's default theme) or "ansi" (your terminal's 16 colors)
+theme = "catppuccin"
+
+# Optional per-color overrides: #rrggbb or a terminal color number
+[colors]
+accent = "#89b4fa"
+
+# A shell command, run with `sh -c` in the directory of the pane you opened the launcher from
+[[commands]]
+name = "gh browse"
+description = "Open the repository in the browser"
+command = "gh browse"
+
+# Or one of this plugin's popup panes (lazygit, nvim)
+[[commands]]
+name = "lazygit"
+description = "Open lazygit"
+pane = "lazygit"
+```
+
+### Entry point flags
+
+Each entry point in [herdr-plugin.toml](herdr-plugin.toml) runs `bin/launcher` with different flags. Change them there to build your own variants.
+
+| Flag | Values | launcher | goto |
+| --- | --- | --- | --- |
+| `--start` | `search`, `select` | `select` | `select` |
+| `--sources` | comma-separated `commands`, `panes` | `commands,panes` | `panes` |
+| `--cursor` | `top`, `current` (the pane you are in) | `top` | `current` |
+| `--sort` | `herdr`, `name`, `frecency` | `frecency` | `herdr` |
+
+`--sort` applies when the query is empty; a search is always ordered by match score.
+
+### Frecency
+
+Picking an item records it in the plugin state directory (`history.json`) the way zoxide records directories: each pick adds 1 to its rank, and the score is the rank weighted by recency (×4 within an hour, ×2 within a day, ×0.5 within a week, ×0.25 after that). When the ranks add up to more than 10,000 they are all scaled down, and items that no longer exist are forgotten after 90 days.
+
+Panes are recorded by pane id, so a pane that is closed and opened again starts over.
+
+## Limitations
+
+- Jumping to a pane uses `pane.focus` from herdr's socket API. It is in herdr's API schema but not yet in its documentation or CLI, so it may change.
+- The preview shows the pane as it was when the launcher opened; it does not refresh.
+- herdr's popup border can break where wide characters (such as Japanese) of the pane behind it touch the border. This comes from herdr's rendering.
+- macOS and Linux only.
+
+## Development
+
+```sh
+go test ./...
+go build -o bin/launcher .
+```
+
+## License
+
+[MIT](LICENSE)
