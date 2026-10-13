@@ -162,6 +162,9 @@ func TestGoto(t *testing.T) {
 		{"search", []tea.KeyMsg{runes("/"), runes("b")}, "b", "b1 b2", "b1", false},
 		{"search then esc then j", []tea.KeyMsg{runes("/"), runes("b"), key(tea.KeyEsc), runes("j")}, "b", "b1 b2", "b2", false},
 		{"esc", []tea.KeyMsg{key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
+		{"q", []tea.KeyMsg{runes("q")}, "", "a1 a2 b1 b2 c1", "a1", true},
+		// while searching, q is typed into the search instead of closing
+		{"search q", []tea.KeyMsg{runes("/"), runes("q")}, "q", "", "", false},
 		{"search esc esc", []tea.KeyMsg{runes("/"), key(tea.KeyEsc), key(tea.KeyEsc)}, "", "a1 a2 b1 b2 c1", "a1", true},
 	}
 	for _, tt := range tests {
@@ -272,9 +275,9 @@ func TestHelp(t *testing.T) {
 		m    model
 		want string
 	}{
-		{"panes", model{hasPanes: true}, "/ search  b/w/i/d filter  a all  ←/→ workspace  enter select"},
-		{"commands", model{hasCommands: true}, "/ search  enter select"},
-		{"both", model{hasPanes: true, hasCommands: true}, "/ search  b/w/i/d/c filter  a all  ←/→ workspace  enter select"},
+		{"panes", model{hasPanes: true}, "/ search  b/w/i/d filter  a all  ←/→ workspace  enter select  q close"},
+		{"commands", model{hasCommands: true}, "/ search  enter select  q close"},
+		{"both", model{hasPanes: true, hasCommands: true}, "/ search  b/w/i/d/c filter  a all  ←/→ workspace  enter select  q close"},
 		{"searching from select", model{hasPanes: true, selectFirst: true, searching: true}, "esc done  ctrl-n/p move  enter select"},
 		{"searching from search", model{hasPanes: true, searching: true}, "esc close  ctrl-n/p move  enter select"},
 	}

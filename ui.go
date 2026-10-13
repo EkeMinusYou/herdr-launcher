@@ -154,9 +154,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.searching = false
 		default:
-			if m.searching {
+			switch {
+			case m.searching:
 				m.editQuery(msg)
-			} else {
+			case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+				return m, tea.Quit
+			default:
 				m.navigate(msg)
 			}
 		}
@@ -450,7 +453,7 @@ func (m model) help() []string {
 	if m.hasPanes {
 		help = append(help, "←/→ workspace")
 	}
-	return append(help, enter)
+	return append(help, enter, "q close")
 }
 
 // Puts left at the left edge and right at the right edge, dropping right if it does not fit.
