@@ -5,6 +5,8 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -61,24 +63,14 @@ func applyTheme(name string, overrides palette) error {
 	}
 	p, ok := themes[name]
 	if !ok {
-		names := make([]string, 0, len(themes))
-		for n := range themes {
-			names = append(names, n)
-		}
-		slices.Sort(names)
+		names := slices.Sorted(maps.Keys(themes))
 		return fmt.Errorf("unknown theme %q: use one of %s", name, strings.Join(names, ", "))
 	}
-	for _, c := range []struct {
-		dst *string
-		src string
-	}{
-		{&p.Fg, overrides.Fg}, {&p.Subtle, overrides.Subtle}, {&p.Dim, overrides.Dim}, {&p.Faint, overrides.Faint},
-		{&p.SelectionBg, overrides.SelectionBg}, {&p.CursorFg, overrides.CursorFg}, {&p.Accent, overrides.Accent},
-		{&p.Caret, overrides.Caret}, {&p.Green, overrides.Green}, {&p.Mauve, overrides.Mauve}, {&p.Teal, overrides.Teal}, {&p.Yellow, overrides.Yellow},
-		{&p.Red, overrides.Red}, {&p.Orange, overrides.Orange}, {&p.Blue, overrides.Blue},
-	} {
-		if c.src != "" {
-			*c.dst = c.src
+	// Every palette field is a color string, so copy each one the overrides set.
+	dst, src := reflect.ValueOf(&p).Elem(), reflect.ValueOf(overrides)
+	for i := range src.NumField() {
+		if c := src.Field(i).String(); c != "" {
+			dst.Field(i).SetString(c)
 		}
 	}
 	usePalette(p)

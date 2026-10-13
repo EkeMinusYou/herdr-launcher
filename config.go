@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/charmbracelet/x/ansi"
@@ -42,20 +43,41 @@ func configPath() string {
 	return filepath.Join(dir, "config.toml")
 }
 
-// Uses the default config when path is empty or the file does not exist.
-func loadConfig(path string) (config, error) {
+// The embedded default_config.toml, parsed once.
+var defaults = func() config {
 	var cfg config
-	if path != "" {
-		_, err := toml.DecodeFile(path, &cfg)
-		if err == nil {
-			return cfg, nil
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return cfg, fmt.Errorf("%s: %w", path, err)
-		}
+	if _, err := toml.Decode(defaultConfig, &cfg); err != nil {
+		panic("default_config.toml: " + err.Error())
 	}
-	_, err := toml.Decode(defaultConfig, &cfg)
-	return cfg, err
+	return cfg
+}()
+
+// Reads the user's config.toml. Without one, or for the parts it leaves out, the defaults apply:
+// commands when it has no commands key, and each profile field it does not set (see resolveOptions).
+// Unknown keys are an error so that a typo does not silently do nothing.
+func loadConfig(path string) (config, error) {
+	if path == "" {
+		return defaults, nil
+	}
+	var cfg config
+	md, err := toml.DecodeFile(path, &cfg)
+	if errors.Is(err, fs.ErrNotExist) {
+		return defaults, nil
+	}
+	if err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
+	}
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, len(undecoded))
+		for i, k := range undecoded {
+			keys[i] = k.String()
+		}
+		return cfg, fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
+	}
+	if !md.IsDefined("commands") {
+		cfg.Commands = defaults.Commands
+	}
+	return cfg, nil
 }
 
 func commandItems(cfg config) ([]item, error) {

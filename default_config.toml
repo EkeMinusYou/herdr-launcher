@@ -3,6 +3,8 @@
 # Copy this file to the plugin config directory to customize it:
 #   cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.toml"
 # It is read every time the launcher opens, so edits apply without a rebuild.
+# Anything config.toml leaves out keeps the default here: the commands when it has no commands
+# (write commands = [] for none), the theme, and each profile field. Unknown keys are errors.
 
 # Color theme: "catppuccin" (herdr's default theme) or "ansi" (your terminal's 16 colors).
 theme = "catppuccin"
@@ -15,7 +17,8 @@ theme = "catppuccin"
 
 # Profiles decide what a launcher lists and how it starts. The plugin's launcher and goto panes use
 # the profile of the same name; open a pane with --env LAUNCHER_PROFILE=<name> to use another one.
-# A profile here only needs the fields it changes; the rest come from the default profile of that name.
+# A profile here only needs the fields it changes; the rest come from the default profile of that name,
+# or for a new profile from start = "select", sources = ["commands", "panes"], cursor = "top", sort = "herdr".
 #   start    "select" (move with j/k, / to search) or "search" (type right away)
 #   sources  what to list: "commands", "panes"
 #   cursor   "top" or "current" (the pane you opened it from)

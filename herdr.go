@@ -82,7 +82,7 @@ func socketCall(method string, params, out any) error {
 	return json.Unmarshal(resp.Result, out)
 }
 
-// Turns the current panes into items. Anything that fails to load is left out.
+// Turns the current panes into items. Anything that fails to load is left out and logged.
 // herdr returns panes in workspace order, which is kept as is.
 func paneItems() []item {
 	var (
@@ -97,9 +97,9 @@ func paneItems() []item {
 		}
 		wg sync.WaitGroup
 	)
-	wg.Go(func() { socketCall("workspace.list", map[string]any{}, &ws) })
-	wg.Go(func() { socketCall("tab.list", map[string]any{}, &ts) })
-	wg.Go(func() { socketCall("pane.list", map[string]any{}, &ps) })
+	wg.Go(func() { logError(socketCall("workspace.list", map[string]any{}, &ws)) })
+	wg.Go(func() { logError(socketCall("tab.list", map[string]any{}, &ts)) })
+	wg.Go(func() { logError(socketCall("pane.list", map[string]any{}, &ps)) })
 	wg.Wait()
 
 	wsLabel := map[string]string{}
@@ -120,7 +120,7 @@ func paneItems() []item {
 	}
 
 	// When opened as an overlay the launcher is itself a pane, so skip it and treat the pane it was opened from as current.
-	self, here := os.Getenv("HERDR_PANE_ID"), launchedFrom()
+	self, here := os.Getenv("HERDR_PANE_ID"), launchContext.FocusedPaneID
 	var items []item
 	for _, p := range ps.Panes {
 		if p.ID == self {
@@ -209,14 +209,17 @@ func gitBranch(dir string) string {
 	}
 }
 
-// The pane that was focused when the launcher opened.
-func launchedFrom() string {
-	var ctx struct {
-		FocusedPaneID string `json:"focused_pane_id"`
-	}
-	json.Unmarshal([]byte(os.Getenv("HERDR_PLUGIN_CONTEXT_JSON")), &ctx)
-	return ctx.FocusedPaneID
+// What herdr tells a plugin pane about the pane that was focused when it opened.
+type pluginContext struct {
+	FocusedPaneID  string `json:"focused_pane_id"`
+	FocusedPaneCwd string `json:"focused_pane_cwd"`
 }
+
+var launchContext = func() pluginContext {
+	var ctx pluginContext
+	json.Unmarshal([]byte(os.Getenv("HERDR_PLUGIN_CONTEXT_JSON")), &ctx)
+	return ctx
+}()
 
 func current(focused bool) string {
 	if focused {

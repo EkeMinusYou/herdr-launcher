@@ -12,8 +12,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 type options struct {
@@ -42,10 +40,6 @@ func profileName() string {
 // Builds the options for the named profile. Fields the user's profile leaves out come from the default
 // profile of the same name, so a config.toml only needs the fields it changes.
 func resolveOptions(name string, cfg config) (options, error) {
-	var defaults config
-	if _, err := toml.Decode(defaultConfig, &defaults); err != nil {
-		return options{}, err
-	}
 	def, inDefaults := defaults.Profiles[name]
 	user, inUser := cfg.Profiles[name]
 	if !inDefaults && !inUser {

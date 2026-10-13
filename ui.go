@@ -5,11 +5,10 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"slices"
 	"strings"
-
-	"image/color"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -32,12 +31,12 @@ type model struct {
 	chosen        *item
 	previews      map[string]string // pane screens fetched so far, by item id
 
-	// With --start select, like herdr's goto, j/k move and / starts a search. With search, it is always searching.
+	// With start = "select", like herdr's goto, j/k move and / starts a search. With "search", it is always searching.
 	selectFirst bool
 	searching   bool
 	narrow      string // agent_status narrowed with b/w/i/d, or "commands" with c. Empty shows everything.
 
-	// What --sources includes. Keys that only make sense for a source are enabled and hinted only then.
+	// What the profile's sources include. Keys that only make sense for a source are enabled and hinted only then.
 	hasCommands bool
 	hasPanes    bool
 }
@@ -138,7 +137,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "ctrl+n":
 			m.move(1)
 		case "esc":
-			// With --start select, esc while searching goes back to j/k navigation.
+			// With start = "select", esc while searching goes back to j/k navigation.
 			if !m.selectFirst || !m.searching {
 				return m, tea.Quit
 			}
@@ -166,7 +165,7 @@ func typed(msg tea.KeyPressMsg) string {
 	return msg.Text
 }
 
-// Keys when not searching with --start select (the same as herdr's goto).
+// Keys when not searching with start = "select" (the same as herdr's goto).
 func (m *model) navigate(msg tea.KeyPressMsg) {
 	switch msg.String() {
 	case "left":
@@ -473,13 +472,9 @@ func spread(left, right string, width int) string {
 
 // Draws the character under the cursor in reverse.
 func (m model) queryWithCursor() string {
-	under := " "
+	under, after := " ", ""
 	if m.pos < len(m.query) {
-		under = string(m.query[m.pos])
-	}
-	after := ""
-	if m.pos < len(m.query) {
-		after = string(m.query[m.pos+1:])
+		under, after = string(m.query[m.pos]), string(m.query[m.pos+1:])
 	}
 	return titleStyle.Render(string(m.query[:m.pos])) +
 		lipgloss.NewStyle().Foreground(cursorFg).Background(fg).Render(under) +

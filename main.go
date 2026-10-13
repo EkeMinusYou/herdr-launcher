@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"image/color"
 	"os"
@@ -88,8 +87,10 @@ func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ",
 
 func main() {
 	// Started by afterClose once the launcher has closed.
+	// Nothing is on screen by then, so failures go to the log.
 	if len(os.Args) == 5 && os.Args[1] == "open-pane" {
 		if err := openPaneAfterClose(os.Args[2], os.Args[3], os.Args[4]); err != nil {
+			logError(fmt.Errorf("open pane %s of %s: %w", os.Args[3], os.Args[2], err))
 			os.Exit(1)
 		}
 		return
@@ -97,6 +98,7 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "focus-pane" {
 		waitForClose()
 		if err := focusPane(os.Args[2]); err != nil {
+			logError(fmt.Errorf("focus pane %s: %w", os.Args[2], err))
 			os.Exit(1)
 		}
 		return
@@ -105,8 +107,8 @@ func main() {
 	var (
 		chosen *item
 		items  []item
+		opts   options
 	)
-	var opts options
 	err := rebuildIfStale()
 	if err == nil {
 		chdirToFocusedPane()
@@ -133,7 +135,7 @@ func main() {
 			for _, it := range items {
 				listed[it.id] = true
 			}
-			loadHistory(path).record(path, chosen.id, time.Now(), listed, opts.sources)
+			logError(loadHistory(path).record(path, chosen.id, time.Now(), listed, opts.sources))
 		}
 		err = chosen.run()
 	}
@@ -213,12 +215,8 @@ func rebuildIfStale() error {
 
 // Plugin panes start in the plugin directory; move to the cwd of the pane the launcher was opened from so commands run there.
 func chdirToFocusedPane() {
-	var ctx struct {
-		Cwd string `json:"focused_pane_cwd"`
-	}
-	json.Unmarshal([]byte(os.Getenv("HERDR_PLUGIN_CONTEXT_JSON")), &ctx)
-	if ctx.Cwd != "" {
-		os.Chdir(ctx.Cwd)
+	if cwd := launchContext.FocusedPaneCwd; cwd != "" {
+		os.Chdir(cwd)
 	}
 }
 
@@ -237,7 +235,7 @@ func runCommand(name string, args ...string) error {
 }
 
 // Only one popup can be open at a time, and an overlay restores the previous focus when it closes.
-// To work with both, opening lazygit or focusing a pane happens after the launcher has closed.
+// To work with both, opening another plugin pane or focusing a pane happens after the launcher has closed.
 // Closing stops processes in the same session, so hand the work to a copy of this binary in a new session.
 func afterClose(args ...string) error {
 	self, err := os.Executable()

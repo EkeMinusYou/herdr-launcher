@@ -1,6 +1,6 @@
 package main
 
-// For --sort frecency, records chosen items in HERDR_PLUGIN_STATE_DIR and ranks them the way
+// For sort = "frecency", records chosen items in HERDR_PLUGIN_STATE_DIR and ranks them the way
 // zoxide ranks directories (src/db in ajeetdsouza/zoxide):
 //   - choosing an item adds 1 to its rank and updates its last access time
 //   - when the ranks add up to more than maxRankTotal, every rank is scaled down so the total

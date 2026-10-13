@@ -2,7 +2,7 @@
 # lazygit opens as a plugin pane because keys.command popups are always titled "popup".
 id = "ekeminusyou.launcher"
 name = "Launcher"
-version = "0.2.2"
+version = "0.3.0"
 min_herdr_version = "0.9.0"
 description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
 platforms = ["macos", "linux"]

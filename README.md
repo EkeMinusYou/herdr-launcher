@@ -17,7 +17,7 @@ It ships two entry points:
 - Preview of the selected pane's current screen, its cwd and git branch
 - fzf's matching algorithm and extended search syntax
 - Vim-like navigation (`j`/`k`, `/` to search, `b`/`w`/`i`/`d` to filter by status) and readline/emacs editing in the prompt
-- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or a lazygit popup
+- Commands defined in a TOML file: shell commands run in the directory of the pane you opened the launcher from, or panes such as a lazygit popup, including panes of other plugins
 - `catppuccin` (herdr's default) and `ansi` themes, with per-color overrides
 - Fast: it talks to herdr's socket directly and shows the first frame in about 30 ms
 
@@ -42,7 +42,7 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.2.2
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.3.0
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.
@@ -120,7 +120,7 @@ Lowercase terms are case-insensitive; a term with an uppercase letter is case-se
 
 ## Configuration
 
-The launcher reads `config.toml` from the plugin config directory on every open, so edits apply right away. Without one it uses [default_config.toml](default_config.toml), which is also the reference for the format.
+The launcher reads `config.toml` from the plugin config directory on every open, so edits apply right away. [default_config.toml](default_config.toml) holds the defaults and is also the reference for the format. Anything your `config.toml` leaves out keeps its default: the commands when it has no `commands` (write `commands = []` for none), the theme, and each profile field. Unknown keys are reported as errors, so a typo does not silently do nothing.
 
 ```sh
 cp default_config.toml "$(herdr plugin config-dir ekeminusyou.launcher)/config.toml"
@@ -183,6 +183,8 @@ sources = ["panes"]
 start = "search"
 ```
 
+Fields a new profile leaves out are `start = "select"`, `sources = ["commands", "panes"]`, `cursor = "top"` and `sort = "herdr"`.
+
 ```toml
 # herdr's config.toml
 [[keys.command]]
@@ -197,6 +199,10 @@ description = "search agents"
 Picking an item records it in the plugin state directory (`history.json`) the way zoxide records directories: each pick adds 1 to its rank, and the score is the rank weighted by recency (×4 within an hour, ×2 within a day, ×0.5 within a week, ×0.25 after that). When the ranks add up to more than 10,000 they are all scaled down, and items that no longer exist are forgotten after 90 days.
 
 Panes are recorded by pane id, so a pane that is closed and opened again starts over.
+
+## Troubleshooting
+
+Errors that happen where they cannot be shown, such as a pane list that fails to load or a pane that fails to open after the launcher has closed, are appended to `launcher.log` in the plugin state directory (`~/.local/state/herdr/plugins/ekeminusyou.launcher/` by default).
 
 ## Limitations
 

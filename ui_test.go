@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,16 +40,41 @@ func TestLoadCommands(t *testing.T) {
 	}
 }
 
-func TestLoadCommandsInvalid(t *testing.T) {
-	path := t.TempDir() + "/commands.toml"
-	os.WriteFile(path, []byte("[[commands]]\nname = \"both\"\ncommand = \"ls\"\npane = \"nvim\"\n"), 0o644)
-	cfg, err := loadConfig(path)
-	if err != nil {
-		t.Fatal(err)
+func TestCommandItemsInvalid(t *testing.T) {
+	for _, body := range []string{
+		"name = \"both\"\ncommand = \"ls\"\npane = \"lazygit\"", // command and pane together
+		"name = \"neither\"", // no command or pane
+		"command = \"ls\"",   // no name
+		"name = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"", // plugin without pane
+	} {
+		path := t.TempDir() + "/config.toml"
+		os.WriteFile(path, []byte("[[commands]]\n"+body+"\n"), 0o644)
+		cfg, err := loadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := commandItems(cfg); err == nil {
+			t.Errorf("%q: want error", body)
+		}
 	}
-	if _, err := commandItems(cfg); err == nil {
-		t.Error("want error when both command and pane are set")
+}
+
+// Items that do not depend on the default config.
+func plainItems() []item {
+	mk := func(id string) item { return item{id: id, columns: []column{{id, fg}}} }
+	return []item{mk("lazygit"), mk("gh browse"), mk("gh pr view --web")}
+}
+
+// Sends keys to m and reports whether one of them quit, stopping there.
+func press(m tea.Model, keys ...tea.KeyPressMsg) (model, bool) {
+	for _, k := range keys {
+		var cmd tea.Cmd
+		m, cmd = m.Update(k)
+		if cmd != nil && cmd() == tea.Quit() {
+			return m.(model), true
+		}
 	}
+	return m.(model), false
 }
 
 // typed text, as a terminal delivers a printable key (or a paste of several characters)
@@ -82,11 +109,7 @@ func TestEditQuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var m tea.Model = model{items: testCommands(t), searching: true}
-			for _, k := range tt.keys {
-				m, _ = m.Update(k)
-			}
-			got := m.(model)
+			got, _ := press(model{items: plainItems(), searching: true}, tt.keys...)
 			if string(got.query) != tt.query || got.pos != tt.pos {
 				t.Errorf("got %q pos %d, want %q pos %d", string(got.query), got.pos, tt.query, tt.pos)
 			}
@@ -108,19 +131,10 @@ func TestMoveSelection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mm := model{items: testCommands(t), searching: true}
+			mm := model{items: plainItems(), searching: true}
 			mm.filter()
-			var m tea.Model = mm
-			quit := false
-			for _, k := range tt.keys {
-				var cmd tea.Cmd
-				m, cmd = m.Update(k)
-				if cmd != nil {
-					quit = true
-					break
-				}
-			}
-			if got := m.(model).cursor; got != tt.cursor || quit != tt.quit {
+			m, quit := press(mm, tt.keys...)
+			if got := m.cursor; got != tt.cursor || quit != tt.quit {
 				t.Errorf("cursor %d quit %v, want cursor %d quit %v", got, quit, tt.cursor, tt.quit)
 			}
 		})
@@ -176,17 +190,7 @@ func TestGoto(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mm := model{items: gotoItems(), selectFirst: true, hasPanes: true}
 			mm.filter()
-			var m tea.Model = mm
-			quit := false
-			for _, k := range tt.keys {
-				var cmd tea.Cmd
-				m, cmd = m.Update(k)
-				if cmd != nil && cmd() == tea.Quit() {
-					quit = true
-					break
-				}
-			}
-			got := m.(model)
+			got, quit := press(mm, tt.keys...)
 			var ids []string
 			for _, mt := range got.matches {
 				ids = append(ids, mt.item.id)
@@ -432,9 +436,91 @@ func TestPluginPaneCommand(t *testing.T) {
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].desc, "pane: neovim / nvim") {
 		t.Errorf("items = %+v, err = %v", items, err)
 	}
-	os.WriteFile(path, []byte("[[commands]]\nname = \"x\"\nplugin = \"neovim\"\ncommand = \"ls\"\n"), 0o644)
-	cfg, _ = loadConfig(path)
-	if _, err := commandItems(cfg); err == nil {
-		t.Error("plugin without pane should be an error")
+}
+
+func TestLoadConfig(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	load := func(body string) (config, error) {
+		t.Helper()
+		os.WriteFile(path, []byte(body), 0o644)
+		return loadConfig(path)
+	}
+	// A config.toml that only changes a profile keeps the default commands.
+	if cfg, err := load("[profiles.goto]\nsort = \"frecency\"\n"); err != nil || len(cfg.Commands) != len(defaults.Commands) {
+		t.Errorf("commands = %d, err = %v; want the %d default commands", len(cfg.Commands), err, len(defaults.Commands))
+	}
+	// commands = [] means no commands.
+	if cfg, err := load("commands = []\n"); err != nil || len(cfg.Commands) != 0 {
+		t.Errorf("commands = %d, err = %v; want none", len(cfg.Commands), err)
+	}
+	// Typos are reported instead of ignored.
+	for _, body := range []string{"[profile.goto]\nsort = \"name\"\n", "[profiles.goto]\nsourcs = [\"panes\"]\n", "[colors]\naccnet = \"#000000\"\n"} {
+		if _, err := load(body); err == nil || !strings.Contains(err.Error(), "unknown keys") {
+			t.Errorf("%q: err = %v, want unknown keys", body, err)
+		}
+	}
+}
+
+// Every rendered line fills the popup exactly, so the divider and the herdr border line up.
+func TestRenderWidth(t *testing.T) {
+	items := append(gotoItems(),
+		item{id: "cmd", kind: "command", title: "gh pr view --web", desc: "Open the pull request for the current branch in the browser",
+			command: "gh pr view --web", columns: []column{{"gh pr view --web  ", fg}, {"とても長い説明がここに入ります", subtle}}},
+	)
+	for _, size := range [][2]int{{120, 30}, {61, 12}, {59, 10}, {40, 5}} {
+		m := model{items: items, previews: map[string]string{"a1": "\x1b[31mred\x1b[0m line\n日本語の画面\n"}, hasPanes: true, hasCommands: true}
+		m.width, m.height = size[0], size[1]
+		m.filter()
+		for _, query := range []string{"", "a"} {
+			m.query = []rune(query)
+			lines := strings.Split(m.render(), "\n")
+			if len(lines) != m.height {
+				t.Errorf("%dx%d %q: %d lines, want %d", m.width, m.height, query, len(lines), m.height)
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w != m.width {
+					t.Errorf("%dx%d %q: line %d is %d wide, want %d: %q", m.width, m.height, query, i, w, m.width, ansi.Strip(l))
+				}
+			}
+		}
+	}
+}
+
+func TestGitBranch(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(body), 0o644)
+	}
+	write(root+"/repo/.git/HEAD", "ref: refs/heads/feature/x\n")
+	os.MkdirAll(root+"/repo/sub/dir", 0o755)
+	write(root+"/detached/.git/HEAD", "0123456789abcdef0123456789abcdef01234567\n")
+	// A linked worktree has a .git file pointing at its git directory, here with a relative path.
+	write(root+"/gitdirs/wt/HEAD", "ref: refs/heads/wt-branch\n")
+	write(root+"/wt/.git", "gitdir: ../gitdirs/wt\n")
+	os.MkdirAll(root+"/plain", 0o755)
+
+	for dir, want := range map[string]string{
+		"repo":         "feature/x",
+		"repo/sub/dir": "feature/x", // looks up through parent directories
+		"detached":     "",
+		"wt":           "wt-branch",
+		"plain":        "",
+	} {
+		if got := gitBranch(filepath.Join(root, dir)); got != want {
+			t.Errorf("%s: got %q, want %q", dir, got, want)
+		}
+	}
+}
+
+func TestLogError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	logError(nil)
+	logError(errors.New("pane.list: boom"))
+	b, err := os.ReadFile(filepath.Join(dir, "launcher.log"))
+	if err != nil || strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "pane.list: boom") {
+		t.Errorf("log = %q, err = %v", b, err)
 	}
 }
