@@ -21,7 +21,8 @@ type palette struct {
 	CursorFg    string `toml:"cursor_fg"`    // text under the prompt cursor
 	Accent      string `toml:"accent"`       // matched characters
 	Caret       string `toml:"caret"`        // the > of the prompt and the selected row
-	Green       string `toml:"green"`        // command and done
+	Green       string `toml:"green"`        // command and idle
+	Teal        string `toml:"teal"`         // done
 	Yellow      string `toml:"yellow"`       // working
 	Red         string `toml:"red"`          // blocked
 	Orange      string `toml:"orange"`       // claude
@@ -33,19 +34,19 @@ var themes = map[string]palette{
 	"catppuccin": {
 		Fg: "#cdd6f4", Subtle: "#a6adc8", Dim: "#6c7086", Faint: "#585b70",
 		SelectionBg: "#313244", CursorFg: "#1e1e2e", Accent: "#89b4fa", Caret: "#f2cdcd",
-		Green: "#a6e3a1", Yellow: "#f9e2af", Red: "#f38ba8", Orange: "#fab387", Blue: "#89b4fa",
+		Green: "#a6e3a1", Teal: "#94e2d5", Yellow: "#f9e2af", Red: "#f38ba8", Orange: "#fab387", Blue: "#89b4fa",
 	},
 	// Leaves colors to the terminal.
 	"ansi": {
 		Fg: "", Subtle: "7", Dim: "8", Faint: "8",
 		SelectionBg: "8", CursorFg: "0", Accent: "4", Caret: "5",
-		Green: "2", Yellow: "3", Red: "1", Orange: "3", Blue: "4",
+		Green: "2", Teal: "6", Yellow: "3", Red: "1", Orange: "3", Blue: "4",
 	},
 }
 
 var (
 	fg, subtle, dim, faint, selectionBg, cursorFg, accent, caretColor color.Color
-	green, yellow, red, orange, blue                                  color.Color
+	green, teal, yellow, red, orange, blue                            color.Color
 
 	titleStyle, dimStyle lipgloss.Style
 )
@@ -72,7 +73,7 @@ func applyTheme(name string, overrides palette) error {
 	}{
 		{&p.Fg, overrides.Fg}, {&p.Subtle, overrides.Subtle}, {&p.Dim, overrides.Dim}, {&p.Faint, overrides.Faint},
 		{&p.SelectionBg, overrides.SelectionBg}, {&p.CursorFg, overrides.CursorFg}, {&p.Accent, overrides.Accent},
-		{&p.Caret, overrides.Caret}, {&p.Green, overrides.Green}, {&p.Yellow, overrides.Yellow},
+		{&p.Caret, overrides.Caret}, {&p.Green, overrides.Green}, {&p.Teal, overrides.Teal}, {&p.Yellow, overrides.Yellow},
 		{&p.Red, overrides.Red}, {&p.Orange, overrides.Orange}, {&p.Blue, overrides.Blue},
 	} {
 		if c.src != "" {
@@ -86,7 +87,7 @@ func applyTheme(name string, overrides palette) error {
 func usePalette(p palette) {
 	fg, subtle, dim, faint = lipgloss.Color(p.Fg), lipgloss.Color(p.Subtle), lipgloss.Color(p.Dim), lipgloss.Color(p.Faint)
 	selectionBg, cursorFg, accent, caretColor = lipgloss.Color(p.SelectionBg), lipgloss.Color(p.CursorFg), lipgloss.Color(p.Accent), lipgloss.Color(p.Caret)
-	green, yellow, red, orange, blue = lipgloss.Color(p.Green), lipgloss.Color(p.Yellow), lipgloss.Color(p.Red), lipgloss.Color(p.Orange), lipgloss.Color(p.Blue)
+	green, teal, yellow, red, orange, blue = lipgloss.Color(p.Green), lipgloss.Color(p.Teal), lipgloss.Color(p.Yellow), lipgloss.Color(p.Red), lipgloss.Color(p.Orange), lipgloss.Color(p.Blue)
 	titleStyle = lipgloss.NewStyle().Foreground(fg)
 	dimStyle = lipgloss.NewStyle().Foreground(dim)
 }

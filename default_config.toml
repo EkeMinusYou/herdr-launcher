@@ -9,7 +9,7 @@ theme = "catppuccin"
 
 # Override individual theme colors with #rrggbb or a terminal color number ("4").
 # Keys: fg, subtle, dim, faint, selection_bg, cursor_fg, accent, caret,
-#       green, yellow, red, orange, blue
+#       green, teal, yellow, red, orange, blue
 # [colors]
 # accent = "#89b4fa"
 

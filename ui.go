@@ -508,8 +508,10 @@ func statusColor(status string) color.Color {
 	case "blocked":
 		return red
 	case "done":
+		return teal
+	case "idle":
 		return green
-	default: // idle, unknown
+	default: // unknown
 		return dim
 	}
 }
