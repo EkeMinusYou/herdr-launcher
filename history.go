@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,11 +38,17 @@ func historyPath() string {
 	return filepath.Join(dir, "history.json")
 }
 
-// Treats an unreadable file as empty history.
+// A missing file is empty history. A file that cannot be parsed is logged and treated as empty too,
+// so the next pick starts it over.
 func loadHistory(path string) history {
 	h := history{}
-	if b, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(b, &h)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return h
+	}
+	if err := json.Unmarshal(b, &h); err != nil {
+		logError(fmt.Errorf("%s: %w; starting the history over", path, err))
+		return history{}
 	}
 	return h
 }

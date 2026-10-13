@@ -1,8 +1,8 @@
 package main
 
 // Config file (colors, launcher commands and profiles). Reads config.toml in HERDR_PLUGIN_CONFIG_DIR
-// and falls back to the embedded default_config.toml. User-editable settings do not live in
-// the plugin directory because reinstalling the plugin replaces it.
+// and fills in what it leaves out from the embedded default_config.toml. User-editable settings do
+// not live in the plugin directory because reinstalling the plugin replaces it.
 
 import (
 	_ "embed"

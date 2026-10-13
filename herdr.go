@@ -86,35 +86,35 @@ func socketCall(method string, params, out any) error {
 // herdr returns panes in workspace order, which is kept as is.
 func paneItems() []item {
 	var (
-		ws struct {
+		wsList struct {
 			Workspaces []workspace `json:"workspaces"`
 		}
-		ts struct {
+		tabList struct {
 			Tabs []tab `json:"tabs"`
 		}
-		ps struct {
+		paneList struct {
 			Panes []pane `json:"panes"`
 		}
 		wg sync.WaitGroup
 	)
-	wg.Go(func() { logError(socketCall("workspace.list", map[string]any{}, &ws)) })
-	wg.Go(func() { logError(socketCall("tab.list", map[string]any{}, &ts)) })
-	wg.Go(func() { logError(socketCall("pane.list", map[string]any{}, &ps)) })
+	wg.Go(func() { logError(socketCall("workspace.list", map[string]any{}, &wsList)) })
+	wg.Go(func() { logError(socketCall("tab.list", map[string]any{}, &tabList)) })
+	wg.Go(func() { logError(socketCall("pane.list", map[string]any{}, &paneList)) })
 	wg.Wait()
 
 	wsLabel := map[string]string{}
-	for _, w := range ws.Workspaces {
+	for _, w := range wsList.Workspaces {
 		wsLabel[w.ID] = w.Label
 	}
 	tabLabel := map[string]string{}
-	for _, t := range ts.Tabs {
+	for _, t := range tabList.Tabs {
 		tabLabel[t.ID] = t.Label
 	}
-	branches := gitBranches(ps.Panes)
+	branches := gitBranches(paneList.Panes)
 
 	// Align the workspace and tab columns.
 	wsWidth, tabWidth := 0, 0
-	for _, p := range ps.Panes {
+	for _, p := range paneList.Panes {
 		wsWidth = max(wsWidth, ansi.StringWidth(wsLabel[p.WorkspaceID]))
 		tabWidth = max(tabWidth, ansi.StringWidth(tabLabel[p.TabID]))
 	}
@@ -122,7 +122,7 @@ func paneItems() []item {
 	// When opened as an overlay the launcher is itself a pane, so skip it and treat the pane it was opened from as current.
 	self, here := os.Getenv("HERDR_PANE_ID"), launchContext.FocusedPaneID
 	var items []item
-	for _, p := range ps.Panes {
+	for _, p := range paneList.Panes {
 		if p.ID == self {
 			continue
 		}

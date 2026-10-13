@@ -372,13 +372,6 @@ func TestHelp(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFallback(t *testing.T) {
-	cfg, err := loadConfig(t.TempDir() + "/missing.toml")
-	if err != nil || len(cfg.Commands) == 0 || cfg.Theme != "catppuccin" {
-		t.Errorf("missing file should fall back to the default config, got %+v, %v", cfg, err)
-	}
-}
-
 func TestApplyTheme(t *testing.T) {
 	defer applyTheme("catppuccin", palette{})
 	if err := applyTheme("ansi", palette{Accent: "#123456"}); err != nil {
@@ -439,6 +432,10 @@ func TestPluginPaneCommand(t *testing.T) {
 }
 
 func TestLoadConfig(t *testing.T) {
+	// No config.toml at all means the defaults.
+	if cfg, err := loadConfig(t.TempDir() + "/missing.toml"); err != nil || len(cfg.Commands) == 0 || cfg.Theme != "catppuccin" {
+		t.Errorf("missing file should fall back to the default config, got %+v, %v", cfg, err)
+	}
 	path := t.TempDir() + "/config.toml"
 	load := func(body string) (config, error) {
 		t.Helper()
@@ -472,7 +469,7 @@ func TestRenderWidth(t *testing.T) {
 		m.width, m.height = size[0], size[1]
 		m.filter()
 		for _, query := range []string{"", "a"} {
-			m.query = []rune(query)
+			m.setQuery([]rune(query), len(query))
 			lines := strings.Split(m.render(), "\n")
 			if len(lines) != m.height {
 				t.Errorf("%dx%d %q: %d lines, want %d", m.width, m.height, query, len(lines), m.height)
@@ -522,5 +519,59 @@ func TestLogError(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(dir, "launcher.log"))
 	if err != nil || strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "pane.list: boom") {
 		t.Errorf("log = %q, err = %v", b, err)
+	}
+}
+
+func TestCollectSort(t *testing.T) {
+	titles := func(items []item) string {
+		var ts []string
+		for _, it := range items {
+			ts = append(ts, it.title)
+		}
+		return strings.Join(ts, ", ")
+	}
+	commands := []string{"commands"}
+	items, _ := collect(options{sources: commands, sort: "herdr"}, defaults, history{})
+	if got, want := titles(items), "lazygit, gh browse, gh pr view --web"; got != want {
+		t.Errorf("herdr: got %q, want the config order %q", got, want)
+	}
+	items, _ = collect(options{sources: commands, sort: "name"}, defaults, history{})
+	if got, want := titles(items), "gh browse, gh pr view --web, lazygit"; got != want {
+		t.Errorf("name: got %q, want %q", got, want)
+	}
+	// Picked items come first; the rest keep their order.
+	h := history{"command:gh pr view --web": {Rank: 3, Last: time.Now().Unix()}}
+	items, _ = collect(options{sources: commands, sort: "frecency"}, defaults, h)
+	if got, want := titles(items), "gh pr view --web, lazygit, gh browse"; got != want {
+		t.Errorf("frecency: got %q, want %q", got, want)
+	}
+}
+
+func TestProfileName(t *testing.T) {
+	t.Setenv("LAUNCHER_PROFILE", "")
+	t.Setenv("HERDR_PLUGIN_ENTRYPOINT_ID", "")
+	if got := profileName(); got != "launcher" {
+		t.Errorf("no env: got %q, want launcher", got)
+	}
+	t.Setenv("HERDR_PLUGIN_ENTRYPOINT_ID", "goto")
+	if got := profileName(); got != "goto" {
+		t.Errorf("entrypoint: got %q, want goto", got)
+	}
+	t.Setenv("LAUNCHER_PROFILE", "agents")
+	if got := profileName(); got != "agents" {
+		t.Errorf("LAUNCHER_PROFILE should win over the entrypoint: got %q", got)
+	}
+}
+
+func TestLoadHistoryCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	path := filepath.Join(dir, "history.json")
+	os.WriteFile(path, []byte("{not json"), 0o644)
+	if h := loadHistory(path); len(h) != 0 {
+		t.Errorf("corrupt history = %v, want empty", h)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "launcher.log")); !strings.Contains(string(b), "history.json") {
+		t.Errorf("log = %q, want the history error", b)
 	}
 }

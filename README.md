@@ -42,7 +42,7 @@ To update, run the install again. It replaces the installed version and keeps yo
 # The latest version
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.3.0
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.3.1
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary.

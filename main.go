@@ -108,6 +108,7 @@ func main() {
 		chosen *item
 		items  []item
 		opts   options
+		hist   = loadHistory(historyPath())
 	)
 	err := rebuildIfStale()
 	if err == nil {
@@ -120,7 +121,7 @@ func main() {
 			opts, err = resolveOptions(profileName(), cfg)
 		}
 		if err == nil {
-			items, err = collect(opts, cfg)
+			items, err = collect(opts, cfg, hist)
 		}
 		if err == nil {
 			chosen, err = pick(items, opts)
@@ -135,7 +136,7 @@ func main() {
 			for _, it := range items {
 				listed[it.id] = true
 			}
-			logError(loadHistory(path).record(path, chosen.id, time.Now(), listed, opts.sources))
+			logError(hist.record(path, chosen.id, time.Now(), listed, opts.sources))
 		}
 		err = chosen.run()
 	}
@@ -147,8 +148,8 @@ func main() {
 	}
 }
 
-// Collects items from opts.sources and orders them by opts.sort.
-func collect(opts options, cfg config) ([]item, error) {
+// Collects items from opts.sources and orders them by opts.sort, using h for frecency.
+func collect(opts options, cfg config, h history) ([]item, error) {
 	var items []item
 	for _, source := range opts.sources {
 		switch source {
@@ -166,7 +167,7 @@ func collect(opts options, cfg config) ([]item, error) {
 	case "name":
 		slices.SortStableFunc(items, func(a, b item) int { return strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title)) })
 	case "frecency":
-		h, now := loadHistory(historyPath()), time.Now()
+		now := time.Now()
 		slices.SortStableFunc(items, func(a, b item) int { return cmp.Compare(h.score(b.id, now), h.score(a.id, now)) })
 	}
 	return alignLastColumn(items), nil
