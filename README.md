@@ -35,13 +35,13 @@ herdr plugin install EkeMinusYou/herdr-launcher
 
 The install downloads the prebuilt `bin/launcher.exe` (named `.exe` on every platform) for the plugin version from GitHub Releases and checks it against `SHA256SUMS`. To build it from source with Go instead, set `LAUNCHER_FROM_SOURCE=1` for the install.
 
-To update, run the install again. It replaces the installed version and keeps your config. Add `--ref` with a [release](https://github.com/EkeMinusYou/herdr-launcher/releases) tag to pick a version.
+To update, run the install again. It replaces the installed version and keeps your config. Without `--ref` it installs the tip of `main`, which always points at a released version; add `--ref` with a [release](https://github.com/EkeMinusYou/herdr-launcher/releases) tag to pick a version.
 
 ```sh
-# The latest version
+# The latest version (the tip of main)
 herdr plugin install EkeMinusYou/herdr-launcher
 # A specific version
-herdr plugin install EkeMinusYou/herdr-launcher --ref v0.6.0
+herdr plugin install EkeMinusYou/herdr-launcher --ref v0.7.0
 ```
 
 To work on the plugin from a local checkout instead, build it once and link it. `plugin link` does not build, but after the first build the launcher rebuilds itself whenever a source file is newer than the binary (except on Windows, where you rebuild it by hand).
@@ -161,8 +161,9 @@ A profile decides what the picker lists and how it starts. The launcher and goto
 | `sources` | `commands`, `panes` | `["commands", "panes"]` | `["panes"]` |
 | `cursor` | `top`, `current` (the pane you are in) | `top` | `current` |
 | `sort` | `herdr`, `name`, `frecency` | `frecency` | `herdr` |
+| `width`, `height` | a percentage such as `"80%"`, or a number of cells such as `"120"` | `"70%"` | `"70%"` |
 
-`sort` applies when the query is empty; a search is always ordered by match score.
+`sort` applies when the query is empty; a search is always ordered by match score. `width` and `height` set the popup's size when a plugin action (`ekeminusyou.launcher.open` or `goto`) opens it.
 
 Change a profile in your `config.toml`. Only the fields you set change; the rest keep their defaults, and profiles you leave out keep working as they are:
 
@@ -187,9 +188,11 @@ Fields a new profile leaves out are `start = "select"`, `sources = ["commands", 
 [[keys.command]]
 key = "prefix+a"
 type = "shell"
-command = "herdr plugin pane open --plugin ekeminusyou.launcher --entrypoint launcher --env LAUNCHER_PROFILE=agents --focus"
+command = "herdr plugin pane open --plugin ekeminusyou.launcher --entrypoint launcher --env LAUNCHER_PROFILE=agents --width 80% --height 60% --focus"
 description = "search agents"
 ```
+
+A key opened this way takes the popup size from `--width` and `--height` (70% without them), not from the profile.
 
 ### Frecency
 
@@ -215,7 +218,13 @@ go test ./...
 go build -o bin/launcher.exe .
 ```
 
-To release, bump `version` in [herdr-plugin.toml](herdr-plugin.toml) and push a matching tag (`v0.1.0`). GitHub Actions runs GoReleaser, which uploads the binaries and `SHA256SUMS`. Release binaries never rebuild themselves.
+`herdr plugin install` without `--ref` takes the tip of `main` and downloads the binaries for its `version`, so `main` must always point at a released version. A change to the code goes out as a release:
+
+1. Bump `version` in [herdr-plugin.toml](herdr-plugin.toml) and commit.
+2. Push only a matching tag first (`git push origin v0.1.0`). GitHub Actions runs the tests and GoReleaser, which uploads the binaries and `SHA256SUMS`.
+3. Once the release is published, push `main`.
+
+Changes that do not touch the code or the manifest, such as the README, can go to `main` directly. Release binaries never rebuild themselves.
 
 ## License
 

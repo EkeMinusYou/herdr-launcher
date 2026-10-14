@@ -20,23 +20,30 @@ theme = "catppuccin"
 # Profiles decide what a launcher lists and how it starts. The plugin's launcher and goto panes use
 # the profile of the same name; open a pane with --env LAUNCHER_PROFILE=<name> to use another one.
 # A profile here only needs the fields it changes; the rest come from the default profile of that name,
-# or for a new profile from start = "select", sources = ["commands", "panes"], cursor = "top", sort = "herdr".
+# or for a new profile from start = "select", sources = ["commands", "panes"], cursor = "top", sort = "herdr",
+# width = "70%", height = "70%".
 #   start    "select" (move with j/k, / to search) or "search" (type right away)
 #   sources  what to list: "commands", "panes"
 #   cursor   "top" or "current" (the pane you opened it from)
 #   sort     order when not searching: "herdr", "name" or "frecency"
+#   width, height  popup size when opened by the plugin's actions: a percentage such as "80%",
+#            or a number of terminal cells such as "120"
 
 [profiles.launcher]
 start = "select"
 sources = ["commands", "panes"]
 cursor = "top"
 sort = "frecency"
+width = "70%"
+height = "70%"
 
 [profiles.goto]
 start = "select"
 sources = ["panes"]
 cursor = "current"
 sort = "herdr"
+width = "70%"
+height = "70%"
 
 # Commands shown in the launcher. None by default; uncomment or write your own.
 #   name        shown in the list and used for search

@@ -1,7 +1,7 @@
 # A telescope-like picker for running frequent commands and jumping to panes.
 id = "ekeminusyou.launcher"
 name = "Launcher"
-version = "0.6.0"
+version = "0.7.0"
 min_herdr_version = "0.9.0"
 description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
 platforms = ["macos", "linux", "windows"]
@@ -17,19 +17,20 @@ platforms = ["macos", "linux"]
 command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/fetch-launcher.ps1"]
 platforms = ["windows"]
 
-# Bind keys to these actions. plugin pane open without --cwd starts in the plugin directory,
-# and herdr resolves ./bin/launcher.exe against it. The launcher then moves to the cwd of the pane it was opened from.
+# Bind keys to these actions. They run from the plugin directory and open the pane of the same name
+# at the width and height of its profile in config.toml (launcher.exe open). The launcher then moves to
+# the cwd of the pane it was opened from.
 [[actions]]
 id = "open"
 title = "Open launcher"
 contexts = ["workspace", "tab", "pane", "global"]
-command = ["herdr", "plugin", "pane", "open", "--plugin", "ekeminusyou.launcher", "--entrypoint", "launcher", "--focus"]
+command = ["./bin/launcher.exe", "open", "launcher"]
 
 [[actions]]
 id = "goto"
 title = "Go to pane"
 contexts = ["workspace", "tab", "pane", "global"]
-command = ["herdr", "plugin", "pane", "open", "--plugin", "ekeminusyou.launcher", "--entrypoint", "goto", "--focus"]
+command = ["./bin/launcher.exe", "open", "goto"]
 
 # Each pane uses the profile of the same name from $(herdr plugin config-dir ekeminusyou.launcher)/config.toml,
 # or another one picked with --env LAUNCHER_PROFILE=<name> (see default_config.toml). Colors and commands come from there too.

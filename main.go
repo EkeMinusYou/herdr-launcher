@@ -88,6 +88,15 @@ func alignLastColumn(items []item) []item {
 func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ", kindColor(kind)} }
 
 func main() {
+	// The plugin actions run this to open a picker at the size its profile sets.
+	if len(os.Args) == 3 && os.Args[1] == "open" {
+		if err := openPicker(os.Args[2]); err != nil {
+			logError(fmt.Errorf("open %s: %w", os.Args[2], err))
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	// Started by afterClose once the launcher has closed.
 	// Nothing is on screen by then, so failures go to the log.
 	if len(os.Args) == 5 && os.Args[1] == "open-pane" {
@@ -268,6 +277,23 @@ func waitForClose() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// Opens this plugin's pane for entrypoint as a popup at the size of the profile of the same name.
+// herdr plugin pane open could only use the size in the manifest, which config.toml cannot change.
+func openPicker(entrypoint string) error {
+	cfg, err := loadConfig(configPath())
+	if err != nil {
+		return err
+	}
+	opts, err := resolveOptions(entrypoint, cfg)
+	if err != nil {
+		return err
+	}
+	plugin := cmp.Or(os.Getenv("HERDR_PLUGIN_ID"), "ekeminusyou.launcher")
+	params := map[string]any{"plugin_id": plugin, "entrypoint": entrypoint, "focus": true,
+		"width": popupSize(opts.width), "height": popupSize(opts.height)}
+	return socketCall("plugin.pane.open", params, nil)
 }
 
 func openPaneAfterClose(plugin, entrypoint, cwd string) error {

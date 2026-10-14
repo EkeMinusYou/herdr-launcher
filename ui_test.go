@@ -821,3 +821,30 @@ func TestBackground(t *testing.T) {
 		t.Errorf("none: got %q", got)
 	}
 }
+
+func TestProfileSize(t *testing.T) {
+	if opts, _ := resolveOptions("launcher", defaults); opts.width != "70%" || opts.height != "70%" {
+		t.Errorf("default size %s x %s, want 70%% x 70%%", opts.width, opts.height)
+	}
+	path := t.TempDir() + "/config.toml"
+	os.WriteFile(path, []byte("[profiles.launcher]\nwidth = \"90%\"\n\n[profiles.mine]\nheight = \"30\"\n"), 0o644)
+	cfg, _ := loadConfig(path)
+	if opts, _ := resolveOptions("launcher", cfg); opts.width != "90%" || opts.height != "70%" {
+		t.Errorf("launcher: %s x %s, want 90%% x 70%%", opts.width, opts.height)
+	}
+	if opts, _ := resolveOptions("mine", cfg); opts.width != "70%" || opts.height != "30" {
+		t.Errorf("mine: %s x %s, want 70%% x 30", opts.width, opts.height)
+	}
+	for _, size := range []string{"0%", "101%", "80", "abc", "80 %"} {
+		os.WriteFile(path, []byte("[profiles.goto]\nwidth = \""+size+"\"\n"), 0o644)
+		cfg, _ := loadConfig(path)
+		_, err := resolveOptions("goto", cfg)
+		if valid := size == "80"; (err == nil) != valid {
+			t.Errorf("width %q: err = %v", size, err)
+		}
+	}
+	// herdr takes a percentage as a string and cells as a number.
+	if popupSize("80%") != "80%" || popupSize("120") != 120 {
+		t.Errorf("popupSize = %v, %v", popupSize("80%"), popupSize("120"))
+	}
+}

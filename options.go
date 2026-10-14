@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +21,8 @@ type options struct {
 	sources []string // what to list: commands, panes
 	cursor  string   // initial cursor: top, or current (the focused pane)
 	sort    string   // order when not searching: herdr, name, frecency
+	width   string   // popup size when a plugin action opens it: "80%" or a number of cells
+	height  string
 }
 
 type profileConfig struct {
@@ -26,6 +30,19 @@ type profileConfig struct {
 	Sources []string `toml:"sources"`
 	Cursor  string   `toml:"cursor"`
 	Sort    string   `toml:"sort"`
+	Width   string   `toml:"width"`
+	Height  string   `toml:"height"`
+}
+
+// herdr's popup sizes: a percentage of the terminal from 1% to 100%, or a number of terminal cells.
+var popupSizePattern = regexp.MustCompile(`^((100|[1-9][0-9]?)%|[0-9]+)$`)
+
+// The size as herdr's plugin.pane.open takes it: the percentage string, or the number of cells.
+func popupSize(s string) any {
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	return s
 }
 
 func profileName() string {
@@ -51,11 +68,13 @@ func resolveOptions(name string, cfg config) (options, error) {
 		}
 		return options{}, fmt.Errorf("profile %q is not defined; defined profiles: %s", name, strings.Join(names, ", "))
 	}
-	opts := options{start: "select", sources: []string{"commands", "panes"}, cursor: "top", sort: "herdr"}
+	opts := options{start: "select", sources: []string{"commands", "panes"}, cursor: "top", sort: "herdr", width: "70%", height: "70%"}
 	for _, p := range []profileConfig{def, user} {
 		opts.start = cmp.Or(p.Start, opts.start)
 		opts.cursor = cmp.Or(p.Cursor, opts.cursor)
 		opts.sort = cmp.Or(p.Sort, opts.sort)
+		opts.width = cmp.Or(p.Width, opts.width)
+		opts.height = cmp.Or(p.Height, opts.height)
 		if len(p.Sources) > 0 {
 			opts.sources = p.Sources
 		}
@@ -75,6 +94,11 @@ func resolveOptions(name string, cfg config) (options, error) {
 			if !slices.Contains(c.allow, v) {
 				return options{}, fmt.Errorf("profiles.%s.%s %q: use one of %s", name, c.field, v, strings.Join(c.allow, ", "))
 			}
+		}
+	}
+	for field, v := range map[string]string{"width": opts.width, "height": opts.height} {
+		if !popupSizePattern.MatchString(v) {
+			return options{}, fmt.Errorf("profiles.%s.%s %q: use a percentage such as \"80%%\" or a number of cells such as \"120\"", name, field, v)
 		}
 	}
 	return opts, nil
