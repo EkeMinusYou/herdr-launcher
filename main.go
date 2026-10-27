@@ -1,4 +1,4 @@
-// launcher picks a command or a pane to jump to in a herdr popup and runs it in the cwd of the pane it was opened from.
+// launcher picks a command, pane or workspace in a herdr popup and runs it in the cwd of the pane it was opened from.
 // A profile in config.toml decides what is listed and how it is picked (options.go).
 package main
 
@@ -20,7 +20,7 @@ import (
 
 type item struct {
 	id      string // key for the preview cache
-	kind    string // command, terminal, or an agent name such as claude
+	kind    string // command, workspace, terminal, or an agent name such as claude
 	status  string // herdr's agent_status; empty for commands and terminals
 	title   string // heading of the preview
 	columns []column
@@ -28,7 +28,7 @@ type item struct {
 	group   string // unit for jumping to the previous/next workspace
 	focused bool
 	desc    string
-	command string                 // shell command; empty for panes
+	command string                 // shell command; empty for panes and workspaces
 	run     func() error           // runs once the picker has closed; nil for commands that run inside it
 	preview func() (string, error) // screen shown in the preview; nil shows none
 
@@ -59,8 +59,8 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", max(width-ansi.StringWidth(s), 0))
 }
 
-// Aligns where the last column starts across all items, such as command descriptions and pane names,
-// by padding the column before it.
+// Aligns command descriptions and pane names by padding the column before the last one.
+// Workspace columns are aligned separately because each column has a different meaning.
 func alignLastColumn(items []item) []item {
 	prefixWidth := func(it item) int {
 		w := 0
@@ -71,10 +71,13 @@ func alignLastColumn(items []item) []item {
 	}
 	target := 0
 	for _, it := range items {
+		if it.kind == "workspace" {
+			continue
+		}
 		target = max(target, prefixWidth(it))
 	}
 	for i, it := range items {
-		if len(it.columns) < 2 {
+		if it.kind == "workspace" || len(it.columns) < 2 {
 			continue
 		}
 		cols := append([]column(nil), it.columns...)
@@ -90,7 +93,11 @@ func kindColumn(kind string) column { return column{pad(kind, kindWidth) + "  ",
 func main() {
 	// The plugin actions run this to open a picker at the size its profile sets.
 	if len(os.Args) == 3 && os.Args[1] == "open" {
-		if err := openPicker(os.Args[2]); err != nil {
+		err := rebuildIfStale()
+		if err == nil {
+			err = openPicker(os.Args[2])
+		}
+		if err != nil {
 			logError(fmt.Errorf("open %s: %w", os.Args[2], err))
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -110,6 +117,14 @@ func main() {
 		waitForClose()
 		if err := focusPane(os.Args[2]); err != nil {
 			logError(fmt.Errorf("focus pane %s: %w", os.Args[2], err))
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "focus-workspace" {
+		waitForClose()
+		if err := focusWorkspace(os.Args[2]); err != nil {
+			logError(fmt.Errorf("focus workspace %s: %w", os.Args[2], err))
 			os.Exit(1)
 		}
 		return
@@ -178,6 +193,12 @@ func collect(opts options, cfg config, h history) ([]item, error) {
 			items = append(items, commands...)
 		case "panes":
 			items = append(items, paneItems()...)
+		case "workspaces":
+			workspaces, err := workspaceItems()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, workspaces...)
 		}
 	}
 	switch opts.sort {
@@ -247,7 +268,7 @@ func runInTerminal(command string) error {
 }
 
 // Only one popup can be open at a time, and an overlay restores the previous focus when it closes.
-// To work with both, opening another plugin pane or focusing a pane happens after the launcher has closed.
+// To work with both, opening another plugin pane or changing focus happens after the launcher has closed.
 // Closing stops the popup's processes, so hand the work to a detached copy of this binary.
 func afterClose(args ...string) error {
 	self, err := os.Executable()

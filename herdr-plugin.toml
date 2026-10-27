@@ -1,9 +1,9 @@
 # A telescope-like picker for running frequent commands and jumping to panes.
 id = "ekeminusyou.launcher"
 name = "Launcher"
-version = "0.7.0"
+version = "0.8.0"
 min_herdr_version = "0.9.0"
-description = "Pick and run tools and commands, or jump to panes, in a telescope-like picker."
+description = "Pick and run tools and commands, or jump to panes and workspaces, in a telescope-like picker."
 platforms = ["macos", "linux", "windows"]
 
 # herdr plugin install fetches the prebuilt bin/launcher.exe for this version from GitHub Releases.
@@ -32,6 +32,12 @@ title = "Go to pane"
 contexts = ["workspace", "tab", "pane", "global"]
 command = ["./bin/launcher.exe", "open", "goto"]
 
+[[actions]]
+id = "goto-workspace"
+title = "Go to workspace"
+contexts = ["workspace", "tab", "pane", "global"]
+command = ["./bin/launcher.exe", "open", "goto-workspace"]
+
 # Each pane uses the profile of the same name from $(herdr plugin config-dir ekeminusyou.launcher)/config.toml,
 # or another one picked with --env LAUNCHER_PROFILE=<name> (see default_config.toml). Colors and commands come from there too.
 # A launcher built from source rebuilds itself (except on Windows) when a source file is newer than the binary.
@@ -47,6 +53,15 @@ command = ["./bin/launcher.exe"]
 [[panes]]
 id = "goto"
 title = "goto"
+placement = "popup"
+width = "70%"
+height = "70%"
+command = ["./bin/launcher.exe"]
+
+# A workspace picker that preserves each workspace's active tab and focused pane.
+[[panes]]
+id = "goto-workspace"
+title = "goto workspace"
 placement = "popup"
 width = "70%"
 height = "70%"

@@ -22,7 +22,7 @@ type visit struct {
 	Last int64   `json:"last"` // unix seconds
 }
 
-// Visits by item id: "command:<name>" for commands and the pane id for panes.
+// Visits by item id: "command:<name>", "workspace:<id>", or the pane id.
 type history map[string]visit
 
 const (
@@ -98,6 +98,8 @@ func (h history) forgetStale(now time.Time, listed map[string]bool, sources []st
 		source := "panes"
 		if strings.HasPrefix(id, "command:") {
 			source = "commands"
+		} else if strings.HasPrefix(id, "workspace:") {
+			source = "workspaces"
 		}
 		if checked[source] && !listed[id] && now.Sub(time.Unix(v.Last, 0)) > staleAfter {
 			delete(h, id)

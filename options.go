@@ -1,7 +1,7 @@
 package main
 
 // A profile chooses the items, the starting mode, the cursor position and the order.
-// Profiles are [profiles.<name>] tables in config.toml; default_config.toml defines launcher and goto.
+// Profiles are [profiles.<name>] tables in config.toml; default_config.toml defines the built-in profiles.
 // herdr cannot pass arguments to a plugin pane, so the profile is picked by environment:
 // LAUNCHER_PROFILE (herdr plugin pane open --env LAUNCHER_PROFILE=<name>), else the pane that was opened.
 
@@ -18,8 +18,8 @@ import (
 
 type options struct {
 	start   string   // search: start typing right away / select: move with j/k and press / to search (like herdr's goto)
-	sources []string // what to list: commands, panes
-	cursor  string   // initial cursor: top, or current (the focused pane)
+	sources []string // what to list: commands, panes, workspaces
+	cursor  string   // initial cursor: top, or current (the focused pane or workspace)
 	sort    string   // order when not searching: herdr, name, frecency
 	width   string   // popup size when a plugin action opens it: "80%" or a number of cells
 	height  string
@@ -85,7 +85,7 @@ func resolveOptions(name string, cfg config) (options, error) {
 		allow  []string
 	}{
 		{"start", []string{opts.start}, []string{"search", "select"}},
-		{"sources", opts.sources, []string{"commands", "panes"}},
+		{"sources", opts.sources, []string{"commands", "panes", "workspaces"}},
 		{"cursor", []string{opts.cursor}, []string{"top", "current"}},
 		{"sort", []string{opts.sort}, []string{"herdr", "name", "frecency"}},
 	}

@@ -1,6 +1,6 @@
 package main
 
-// Talks to herdr over its socket API: lists panes and reads their screens, and focuses the chosen pane.
+// Talks to herdr over its socket API: lists workspaces and panes, reads screens, and changes focus.
 
 import (
 	"bufio"
@@ -16,8 +16,13 @@ import (
 )
 
 type workspace struct {
-	ID    string `json:"workspace_id"`
-	Label string `json:"label"`
+	ID          string `json:"workspace_id"`
+	Label       string `json:"label"`
+	Focused     bool   `json:"focused"`
+	TabCount    int    `json:"tab_count"`
+	PaneCount   int    `json:"pane_count"`
+	ActiveTabID string `json:"active_tab_id"`
+	AgentStatus string `json:"agent_status"`
 }
 
 type tab struct {
@@ -36,6 +41,19 @@ type pane struct {
 	Title       string `json:"terminal_title_stripped"`
 	Cwd         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
+}
+
+type sessionSnapshot struct {
+	FocusedWorkspaceID string       `json:"focused_workspace_id"`
+	Workspaces         []workspace  `json:"workspaces"`
+	Tabs               []tab        `json:"tabs"`
+	Panes              []pane       `json:"panes"`
+	Layouts            []paneLayout `json:"layouts"`
+}
+
+type paneLayout struct {
+	TabID         string `json:"tab_id"`
+	FocusedPaneID string `json:"focused_pane_id"`
 }
 
 // Sends one request to the herdr socket and decodes its result into out (skipped when out is nil).
@@ -159,6 +177,119 @@ func paneItems() []item {
 	return items
 }
 
+// Lists each workspace once, using the focused pane of its active tab for the preview.
+func workspaceItems() ([]item, error) {
+	var resp struct {
+		Snapshot sessionSnapshot `json:"snapshot"`
+	}
+	if err := socketCall("session.snapshot", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return itemsFromWorkspaces(resp.Snapshot, launchContext, os.Getenv("HERDR_PANE_ID")), nil
+}
+
+func itemsFromWorkspaces(snapshot sessionSnapshot, ctx pluginContext, self string) []item {
+	panes := make(map[string]pane, len(snapshot.Panes))
+	for _, p := range snapshot.Panes {
+		panes[p.ID] = p
+	}
+	tabs := make(map[string]tab, len(snapshot.Tabs))
+	for _, t := range snapshot.Tabs {
+		tabs[t.ID] = t
+	}
+	focusedPane := make(map[string]string, len(snapshot.Layouts))
+	for _, layout := range snapshot.Layouts {
+		focusedPane[layout.TabID] = layout.FocusedPaneID
+	}
+	// An overlay focuses its own pane. The invocation context identifies the underlying one.
+	currentWorkspace := ctx.WorkspaceID
+	if currentWorkspace == "" {
+		currentWorkspace = panes[ctx.FocusedPaneID].WorkspaceID
+	}
+	if currentWorkspace == "" {
+		currentWorkspace = snapshot.FocusedWorkspaceID
+	}
+	branches := map[string]string{}
+	var items []item
+	for _, w := range snapshot.Workspaces {
+		focused := w.ID == currentWorkspace
+		if currentWorkspace == "" {
+			focused = w.Focused
+		}
+		paneID := focusedPane[w.ActiveTabID]
+		if p, ok := panes[ctx.FocusedPaneID]; focused && ok && p.WorkspaceID == w.ID && p.ID != self {
+			paneID = p.ID
+		}
+		p, hasPane := panes[paneID]
+		hasPane = hasPane && paneID != self && p.WorkspaceID == w.ID
+		paneCount := w.PaneCount
+		if p, ok := panes[self]; ok && p.WorkspaceID == w.ID {
+			paneCount = max(paneCount-1, 0)
+		}
+		desc := fmt.Sprintf("tabs: %d, panes: %d%s", w.TabCount, paneCount, current(focused))
+		extra := ""
+		branchColumn, agentColumn, taskColumn := "", "", ""
+		var preview func() (string, error)
+		if hasPane {
+			if p.Cwd != "" {
+				if _, ok := branches[p.Cwd]; !ok {
+					branches[p.Cwd] = gitBranch(p.Cwd)
+				}
+			}
+			branch := branches[p.Cwd]
+			tabName, name := tabs[p.TabID].Label, paneName(p)
+			desc += fmt.Sprintf("\nactive: %s › %s\ncwd: %s", tabName, name, shortenHome(p.Cwd))
+			if branch != "" {
+				desc += "\nbranch: " + branch
+			}
+			branchColumn = branch
+			agentColumn = p.Agent
+			if name != "" && name != w.Label && name != branch && name != p.Agent {
+				taskColumn = name
+			}
+			extra = tabName + " " + p.Cwd
+			preview = func() (string, error) { return readPane(paneID) }
+		}
+		items = append(items, item{
+			id:      "workspace:" + w.ID,
+			kind:    "workspace",
+			status:  w.AgentStatus,
+			title:   w.Label,
+			columns: []column{{w.Label, fg}, {branchColumn, subtle}, {agentColumn, kindColor(agentColumn)}, {taskColumn, fg}},
+			extra:   extra,
+			group:   w.ID,
+			focused: focused,
+			desc:    desc,
+			run:     func() error { return afterClose("focus-workspace", w.ID) },
+			preview: preview,
+		})
+	}
+	return alignWorkspaceColumns(items)
+}
+
+// Align the workspace, branch and agent columns independently, including missing fields.
+func alignWorkspaceColumns(items []item) []item {
+	widths := [3]int{}
+	for _, it := range items {
+		for i := range widths {
+			widths[i] = max(widths[i], ansi.StringWidth(it.columns[i].text))
+		}
+	}
+	for i := range items {
+		cols := items[i].columns
+		last := len(cols) - 1
+		for last > 0 && cols[last].text == "" {
+			last--
+		}
+		for j := 0; j < last; j++ {
+			if widths[j] > 0 {
+				cols[j].text = pad(cols[j].text, widths[j]) + "  "
+			}
+		}
+	}
+	return items
+}
+
 // Looks up the git branch of each pane's cwd. Empty outside a git repository.
 func gitBranches(panes []pane) map[string]string {
 	branches := map[string]string{}
@@ -210,6 +341,7 @@ func gitBranch(dir string) string {
 
 // What herdr tells a plugin pane about the pane that was focused when it opened.
 type pluginContext struct {
+	WorkspaceID    string `json:"workspace_id"`
 	FocusedPaneID  string `json:"focused_pane_id"`
 	FocusedPaneCwd string `json:"focused_pane_cwd"`
 }
@@ -245,6 +377,10 @@ func paneName(p pane) string {
 // The CLI does not expose it, so it goes through the socket.
 func focusPane(paneID string) error {
 	return socketCall("pane.focus", map[string]string{"pane_id": paneID}, nil)
+}
+
+func focusWorkspace(workspaceID string) error {
+	return socketCall("workspace.focus", map[string]string{"workspace_id": workspaceID}, nil)
 }
 
 // Reads what the pane currently shows, with colors.

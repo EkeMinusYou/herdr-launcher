@@ -43,9 +43,10 @@ type model struct {
 	searching   bool
 	narrow      string // agent_status narrowed with b/w/i/d, or "commands" with c. Empty shows everything.
 
-	// Whether commands and panes are listed. Keys that only make sense for one are enabled and hinted only then.
-	hasCommands bool
-	hasPanes    bool
+	// Keys that only make sense for the listed sources are enabled and hinted only then.
+	hasCommands   bool
+	hasPanes      bool
+	hasWorkspaces bool
 }
 
 type previewMsg struct{ key, content string }
@@ -72,15 +73,16 @@ func pick(items []item, opts options, record func(id string)) (*item, error) {
 func newModel(items []item, opts options, record func(id string)) model {
 	selectFirst := opts.start == "select"
 	m := model{
-		items:       items,
-		previews:    map[string]string{},
-		fetching:    map[string]bool{},
-		outputs:     map[string]*commandOutput{},
-		record:      record,
-		selectFirst: selectFirst,
-		searching:   !selectFirst,
-		hasCommands: slices.ContainsFunc(items, func(it item) bool { return it.kind == "command" }),
-		hasPanes:    slices.Contains(opts.sources, "panes"),
+		items:         items,
+		previews:      map[string]string{},
+		fetching:      map[string]bool{},
+		outputs:       map[string]*commandOutput{},
+		record:        record,
+		selectFirst:   selectFirst,
+		searching:     !selectFirst,
+		hasCommands:   slices.ContainsFunc(items, func(it item) bool { return it.kind == "command" }),
+		hasPanes:      slices.Contains(opts.sources, "panes"),
+		hasWorkspaces: slices.Contains(opts.sources, "workspaces"),
 	}
 	m.filter()
 	if opts.cursor == "current" {
@@ -348,13 +350,13 @@ func (m *model) navigate(msg tea.KeyPressMsg) {
 	}
 }
 
-// Narrowing keys. Only panes have a status, and c only matters when commands and panes are mixed.
+// Narrowing keys. Panes and workspaces have statuses; c matters when they are mixed with commands.
 func (m model) narrowKeys() map[string]string {
 	keys := map[string]string{}
-	if m.hasPanes {
+	if m.hasPanes || m.hasWorkspaces {
 		keys["b"], keys["w"], keys["i"], keys["d"] = "blocked", "working", "idle", "done"
 	}
-	if m.hasCommands && m.hasPanes {
+	if m.hasCommands && (m.hasPanes || m.hasWorkspaces) {
 		keys["c"] = "commands"
 	}
 	if len(keys) > 0 {
