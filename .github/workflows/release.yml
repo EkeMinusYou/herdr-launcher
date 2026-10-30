@@ -21,6 +21,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Validate native mod
+        run: |
+          node --check mods/launcher/main.js
+          node --test tests/herdr-mod.test.mjs
+          python3 -m unittest discover -s tests -p 'test_*.py'
       - run: go test ./...
       - uses: goreleaser/goreleaser-action@v7
         with:

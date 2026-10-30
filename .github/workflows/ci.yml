@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  native-mod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: node --check mods/launcher/main.js
+      - run: node --test tests/herdr-mod.test.mjs
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'
+
   test:
     strategy:
       matrix:

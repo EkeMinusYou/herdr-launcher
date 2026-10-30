@@ -2,6 +2,13 @@
 
 A telescope-like picker for [herdr](https://herdr.dev): run your frequent commands and jump to any pane or workspace, with a preview of the pane's screen.
 
+Available for both **Herdr UI** and **Herdr TUI** in this repository:
+
+- **Herdr UI:** a native [Launcher mod](docs/herdr-mod.md) in `mods/launcher/`, with commands, panes and spaces in a popup. See [RECIPE.md](RECIPE.md) for its behavior and installation brief.
+- **Herdr TUI:** the Go plugin described below, installed with `herdr plugin install`.
+
+The native mod uses Herdr UI and herdr-core directly; it does not need Go, a prebuilt launcher binary, or the TUI plugin. Its JSON configuration and history are separate from the TUI's TOML configuration and history.
+
 ![The launcher listing commands and agent panes, with a preview of the selected pane](assets/launcher.png)
 
 It ships three entry points:
@@ -228,7 +235,14 @@ Errors that happen where they cannot be shown, such as a pane list that fails to
 ```sh
 go test ./...
 go build -o bin/launcher.exe .
+# Native mod tests (Node.js 22 or later)
+node --test tests/herdr-mod.test.mjs
+python3 -m unittest discover -s tests -p 'test_*.py'
+# Requires the Herdr UI application
+herdr-app check mods/launcher
 ```
+
+For native mod development and manual checks, see [Herdr UI mod](docs/herdr-mod.md). The native mod has no build step; the Go release process below applies to the TUI plugin.
 
 `herdr plugin install` without `--ref` takes the tip of `main` and downloads the binaries for its `version`, so `main` must always point at a released version. A change to the code goes out as a release:
 

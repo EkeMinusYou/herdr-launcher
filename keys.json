@@ -1,0 +1,16 @@
+{
+  "global": { "ctrl-shift-k": "mod.open:launcher" },
+  "terminal": { "ctrl-shift-k": "mod.open:launcher" },
+  "mod:launcher": {
+    "down": "launcher.next",
+    "up": "launcher.prev",
+    "ctrl-n": "launcher.next",
+    "ctrl-p": "launcher.prev",
+    "enter": "launcher.accept",
+    "escape": "launcher.escape",
+    "tab": "launcher.cycle",
+    "ctrl-1": "launcher.launcher",
+    "ctrl-2": "launcher.panes",
+    "ctrl-3": "launcher.spaces"
+  }
+}
