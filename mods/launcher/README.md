@@ -1,6 +1,6 @@
 # Launcher for Herdr UI
 
-A native, telescope-like popup for [Herdr UI](https://herdr.dev): run your commands, find a pane, or switch spaces with a live terminal preview.
+A native launcher for [Herdr UI](https://herdr.dev): search your commands, panes and spaces in a popup, with a live terminal preview alongside the results.
 
 ![Launcher showing commands and panes alongside a colored terminal preview](../../preview.png)
 

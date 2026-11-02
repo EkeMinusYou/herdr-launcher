@@ -1,11 +1,11 @@
 # herdr-launcher
 
-A telescope-like picker for [herdr](https://herdr.dev): run your frequent commands and jump to any pane or workspace, with a preview of the pane's screen.
+Launchers for [herdr](https://herdr.dev): run your frequent commands and switch between panes and workspaces with live terminal previews.
 
 Available for both **Herdr UI** and **Herdr TUI** in this repository:
 
-- **Herdr UI:** a native [Launcher mod](mods/launcher/README.md) in `mods/launcher/`, with commands, panes and spaces in a popup. Its README covers installation, keyboard shortcuts and configuration.
-- **Herdr TUI:** the Go plugin described below, installed with `herdr plugin install`.
+- **Herdr UI:** a native [Launcher mod](mods/launcher/README.md) in `mods/launcher/`, with searchable command, pane and space lists in a popup. Its README covers installation, keyboard shortcuts and configuration.
+- **Herdr TUI:** a telescope-like picker written in Go, described below and installed with `herdr plugin install`.
 
 The native mod uses Herdr UI and herdr-core directly; it does not need Go, a prebuilt launcher binary, or the TUI plugin. Its JSON configuration and history are separate from the TUI's TOML configuration and history.
 
@@ -15,7 +15,7 @@ The screenshot uses example commands and a demo terminal; the mod ships with an 
 
 ## Herdr TUI plugin
 
-The rest of this README describes the Go plugin for Herdr TUI.
+The Go plugin provides a telescope-like picker inside Herdr TUI. The rest of this README covers its installation, configuration and use.
 
 ![The launcher listing commands and agent panes, with a preview of the selected pane](assets/launcher.png)
 

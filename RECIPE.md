@@ -1,6 +1,6 @@
 # Launcher
 
-A telescope-like native popup for Herdr UI: run your own commands, find a terminal or mod pane, or switch spaces while reading the selected terminal's screen. Add it to your existing window without replacing its layout. This repository also contains a separate Go plugin for Herdr TUI; this recipe describes the native UI mod only.
+A native launcher for Herdr UI: search your commands, terminal or mod panes, and spaces in a popup, with a live terminal preview alongside the results. Add it to your existing window without replacing its layout. This repository also contains a separate Go plugin for Herdr TUI; this recipe describes the native UI mod only.
 
 ![Launcher](preview.png)
 

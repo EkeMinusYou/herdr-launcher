@@ -2,7 +2,7 @@
 
 For an overview, screenshots and a quick start, see the [Launcher mod README](../mods/launcher/README.md).
 
-The native Launcher mod brings the command and pane picker to [Herdr UI](https://herdr.dev/mods/). It uses the app's live spaces and panes, with no Go binary or TUI plugin required. Python 3 enables colored screen previews; without it, the mod falls back to plain text. It was checked with Herdr UI 0.1.9. Follow the API files installed by your app if a later version changes the mod interface.
+The native Launcher mod for [Herdr UI](https://herdr.dev/mods/) puts searchable command, pane and space lists in a popup with a live terminal preview. It uses the app's live spaces and panes, with no Go binary or TUI plugin required. Python 3 enables colored screen previews; without it, the mod falls back to plain text. It was checked with Herdr UI 0.1.9. Follow the API files installed by your app if a later version changes the mod interface.
 
 ![Launcher in Herdr UI](../preview.png)
 
