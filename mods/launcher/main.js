@@ -206,6 +206,11 @@ export default class Launcher extends View {
     catch (error) { this.error = `Cannot save history: ${error.message ?? error}`; }
   }
 
+  openPreview(item) {
+    this.dismiss();
+    run("pane.focus", { terminal: item.terminal });
+  }
+
   activate(cx) {
     const item = this.rows().find(r => r.id === this.selected);
     if (!item || this.running) return;
@@ -294,7 +299,10 @@ export default class Launcher extends View {
             .child(Scrollbar.vertical("launcher-list").absolute().inset_0()))
           .when(rows.length === 0, el => el.child(div().p(16).text_color(t.muted).child("No matches. Try another search or filter."))))
         .child(v_flex().flex_1().min_w(0).min_h(0).gap(8).p(12).rounded(8).bg(t.background).border(1).border_color(t.border)
-          .child(div().font_semibold().truncate().child(item?.title ?? "Preview"))
+          .child(h_flex().gap(8).items_center()
+            .child(div().flex_1().font_semibold().truncate().child(item?.title ?? "Preview"))
+            .when(Boolean(item?.terminal), el => el.child(this.button(t, "open-preview", "View terminal / images ↗", false,
+              () => this.openPreview(item)))))
           .child(div().text_size(11).text_color(t.muted).truncate().child(item?.cwd ?? (item?.kind === "command" ? this.context?.cwd ?? "" : "")))
           .child(v_flex().id("preview-text").flex_1().min_h(0).overflow_y_scrollbar().overflow_x_scrollbar().text_size(11).font_family("JetBrains Mono")
             .child(item?.terminal && this.previewRows !== null ? screenView(this.previewRows, t) : div().child(body ?? "")))))

@@ -10,7 +10,9 @@ import threading
 import time
 import unicodedata
 
-ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-2A-Z]|\x1b[ -/]*[0-~]")
+# Consume string controls as a whole, including live Kitty/Sixel payloads. Their
+# base64/pixel bytes must never become text or move the preview's cursor.
+ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|\x1b[P_X^].*?(?:\x1b\\|$)|\x1b[()][0-2A-Z]|\x1b[ -/]*[0-~]", re.DOTALL)
 
 
 def capture(terminal):
@@ -231,10 +233,17 @@ def decode_screen(text, cols=80, rows=24):
             char, fmt = row.get(col, (" ", {}))
             if not char:
                 continue
-            if runs and runs[-1]["style"] == fmt:
+            width = 2 if unicodedata.east_asian_width(char[0]) in ("W", "F") else 1
+            # ASCII shares the preview's monospace metrics. Anchor all other
+            # glyphs separately: fallback fonts can have different advances,
+            # including CJK, box drawing, emoji and combining graphemes.
+            if (runs and runs[-1]["style"] == fmt and char.isascii()
+                    and runs[-1]["text"].isascii()
+                    and runs[-1]["col"] + runs[-1]["width"] == col):
                 runs[-1]["text"] += char
+                runs[-1]["width"] += width
             else:
-                runs.append({"text": char, "style": fmt})
+                runs.append({"text": char, "style": fmt, "col": col, "width": width})
         output.append(runs)
     while output and not output[-1]:
         output.pop()

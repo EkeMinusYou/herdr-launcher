@@ -62,8 +62,8 @@ class ScreenTests(unittest.TestCase):
 
     def test_ansi_palette_and_style_reset(self):
         rows = screen.decode_screen("\x1b[1;36mcyan\x1b[0m plain")["rows"]
-        self.assertEqual(rows[0][0], {"text": "cyan", "style": {"bold": True, "fg": 6}})
-        self.assertEqual(rows[0][1], {"text": " plain", "style": {}})
+        self.assertEqual(rows[0][0], {"text": "cyan", "style": {"bold": True, "fg": 6}, "col": 0, "width": 4})
+        self.assertEqual(rows[0][1], {"text": " plain", "style": {}, "col": 4, "width": 6})
 
     def test_indexed_and_truecolor_background(self):
         rows = screen.decode_screen("\x1b[38;5;196;48;2;10;20;30mcolor")["rows"]
@@ -82,6 +82,29 @@ class ScreenTests(unittest.TestCase):
         rows = screen.decode_screen("日本e\u0301\x1b[7GX", 12, 2)["rows"]
         self.assertEqual(text(rows), "日本e\u0301 X")
 
+    def test_borders_keep_their_terminal_column_across_fallback_fonts_and_styles(self):
+        result = screen.decode_screen(
+            "日本語\x1b[10G\x1b[32m│\r\n"
+            "\x1b[0mASCII\x1b[10G\x1b[1;32m│\r\n"
+            "\x1b[0me\u0301→\x1b[10G│", 16, 4)
+        for row in result["rows"]:
+            border = row[-1]
+            self.assertEqual((border["text"], border["col"], border["width"]), ("│", 9, 1))
+        japanese = result["rows"][0][:3]
+        self.assertEqual([(run["text"], run["col"], run["width"]) for run in japanese],
+                         [("日", 0, 2), ("本", 2, 2), ("語", 4, 2)])
+        combined = result["rows"][2][0]
+        self.assertEqual((combined["text"], combined["col"], combined["width"]), ("e\u0301", 0, 1))
+
+    def test_graphics_control_strings_do_not_corrupt_text_or_positions(self):
+        for payload in ["\x1b_Ga=T,f=100;AAAA\x1b\\", "\x1bPq#0;2;100;0;0~\x1b\\",
+                        "\x1b_Xignored\ntext\x1b\\", "\x1b^ignored\x1b\\"]:
+            with self.subTest(payload=payload):
+                rows = screen.decode_screen("a" + payload + "b\x1b[10G│", 16, 2)["rows"]
+                self.assertEqual(text(rows), "ab       │")
+                self.assertEqual(rows[0][-1]["col"], 9)
+        self.assertEqual(text(screen.decode_screen("a\x1b_Gm=1;incomplete")["rows"]), "a")
+
     def test_osc_titles_and_mode_controls_are_not_screen_text(self):
         rows = screen.decode_screen("\x1b]2;title\x1b\\\x1b[?2004h\x1b[9G\x1bH\x1b[Hprompt")["rows"]
         self.assertEqual(text(rows), "prompt")
@@ -89,7 +112,7 @@ class ScreenTests(unittest.TestCase):
     def test_background_spaces_are_kept_and_empty_bottom_rows_trimmed(self):
         rows = screen.decode_screen("\x1b[41m   \x1b[0m\r\n", 10, 4)["rows"]
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], {"text": "   ", "style": {"bg": 1}})
+        self.assertEqual(rows[0][0], {"text": "   ", "style": {"bg": 1}, "col": 0, "width": 3})
 
     def test_screen_bounds_limit_output(self):
         result = screen.decode_screen("x" * 100000, 10000, 10000)

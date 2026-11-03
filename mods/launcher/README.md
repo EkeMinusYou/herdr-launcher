@@ -14,6 +14,7 @@ The screenshots use example commands and a demo terminal. The shipped [config.js
 - Smart-case fuzzy search across names, branches, machines and directories.
 - Keyboard navigation, clickable status filters and live agent status indicators.
 - Colored terminal previews, refreshed every 500 ms and cached while the popup is open.
+- Cell-aligned CJK text and borders; **View terminal / images ↗** opens the actual terminal for graphics, which the core’s preview stream does not replay.
 - The current Herdr theme, including light and dark colors.
 
 This mod uses Herdr UI and herdr-core directly. It does not require Go or the [Herdr TUI plugin](../../README.md#herdr-tui-plugin). Configuration and selection history are separate from the TUI plugin.

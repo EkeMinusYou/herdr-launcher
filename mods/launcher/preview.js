@@ -1,5 +1,8 @@
 import { div } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
+import { v_flex } from "gpui-base";
+
+const CELL_WIDTH = 6.6; // JetBrains Mono at 11px: 0.6em per terminal column.
+const CELL_HEIGHT = 16;
 
 function color(value, t, fallback) {
   if (typeof value === "string") return value;
@@ -16,20 +19,24 @@ function color(value, t, fallback) {
 }
 
 export function screenView(rows, t) {
-  return v_flex().gap(0).items_start().children(rows.map(row =>
-    h_flex().h(16).flex_none().gap(0).items_start().whitespace_nowrap()
-      .when(row.length === 0, el => el.child(" "))
-      .children(row.map(run => {
-        const s = run.style;
-        const foreground = color(s.fg, t, t.foreground);
-        const background = color(s.bg, t, t.background);
-        return div().flex_none().whitespace_nowrap()
-          .text_color(s.reverse ? background : foreground)
-          .when(s.bg !== undefined || s.reverse, el => el.bg(s.reverse ? foreground : background))
-          .when(s.bold, el => el.font_bold())
-          .when(s.dim, el => el.opacity(0.65))
-          .when(s.italic, el => el.italic())
-          .when(s.underline, el => el.underline())
-          .child(run.text);
-      }))));
+  const columns = rows.reduce((width, row) => row.reduce((width, run) =>
+    Math.max(width, run.col + run.width), width), 1);
+  return v_flex().w(columns * CELL_WIDTH).flex_none().gap(0).items_start()
+    .font_family("JetBrains Mono").text_size(11).line_height(`${CELL_HEIGHT}px`)
+    .children(rows.map(row =>
+      div().relative().w_full().h(CELL_HEIGHT).flex_none()
+        .children(row.map(run => {
+          const s = run.style;
+          const foreground = color(s.fg, t, t.foreground);
+          const background = color(s.bg, t, t.background);
+          return div().absolute().left(run.col * CELL_WIDTH).top(0)
+            .w(run.width * CELL_WIDTH).h(CELL_HEIGHT).overflow_hidden().whitespace_nowrap()
+            .text_color(s.reverse ? background : foreground)
+            .when(s.bg !== undefined || s.reverse, el => el.bg(s.reverse ? foreground : background))
+            .when(s.bold, el => el.font_bold())
+            .when(s.dim, el => el.opacity(0.65))
+            .when(s.italic, el => el.italic())
+            .when(s.underline, el => el.underline())
+            .child(run.text);
+        }))));
 }
